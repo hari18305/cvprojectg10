@@ -246,7 +246,7 @@ const g = (k, m = "1000") => (A[k] ? pct(A[k].dr_at[m]) : "—");
     { text: "Findings", options: { bold: true, fontSize: 17, breakLine: true } },
     { text: `Calibration adds +${(100 * (B.dr_at["100"] - T["BING stage I only"].dr_at["100"])).toFixed(0)} pts DR@100`, options: { bullet: true, breakLine: true } },
     { text: "Binary = float accuracy", options: { bullet: true, breakLine: true } },
-    { text: `Selective Search: tighter boxes (MABO ${SS.mabo_at["1000"].toFixed(2)} vs ${B.mabo_at["1000"].toFixed(2)}) but ~${Math.round(sp["numba|binary|linear"] / SS.fps)}× slower`, options: { bullet: true } },
+    { text: `Selective Search: tighter boxes (MABO ${SS.mabo_at["1000"].toFixed(2)} vs ${B.mabo_at["1000"].toFixed(2)}) but ~${Math.round(BSS.fps / SS.fps)}× slower on the same images`, options: { bullet: true } },
   ], { x: 9.15, y: 1.85, w: 3.45, h: 4.7, fontFace: BODY, fontSize: 13.5, color: C.ink, valign: "top", margin: 0, paraSpaceAfter: 6, isTextBox: true });
 }
 
@@ -307,7 +307,7 @@ const NOTES = [
   "(~50 s) The whole image is resized once per window size. The bottom row shows the bit planes used as the binarized feature. The filter becomes a weighted sum of +/-1 vectors, the feature becomes 4 bit planes, and the dot product becomes AND plus POPCOUNT: 12 popcounts per window instead of 64 multiply-adds. Unit tests confirm the bitwise score equals the float score.",
   "(~40 s) Data. PASCAL VOC could not be downloaded in our environment, so we generated a synthetic benchmark with ground truth, including distracting clutter, and hand-labelled 58 objects in 10 real photos never used in training. Baselines are Selective Search, sliding windows and random boxes.",
   "(~40 s) RESULT ANALYSIS. Detection rate against number of proposals. BING finds about 95 percent of objects within 1000 proposals, far above random boxes; our diversified variant reaches 97 percent.",
-  "(~60 s) Comparison with existing methods. BING beats sliding windows and random boxes by a wide margin. Selective Search gives tighter boxes but is roughly a hundred times slower. Calibration clearly helps at small budgets, and binarization costs no accuracy. Compared with the paper's VOC numbers (96.2 percent at 1000), our recall is in the same range; our speed is lower because we use Python instead of hand-optimised C++.",
+  "(~60 s) Comparison with existing methods. BING beats sliding windows and random boxes by a wide margin. Selective Search gives tighter boxes but is roughly forty times slower on the same images. Calibration clearly helps at small budgets, and binarization costs no accuracy. Compared with the paper's VOC numbers (96.2 percent at 1000), our recall is in the same range; our speed is lower because we use Python instead of hand-optimised C++.",
   "(~40 s) On real photographs, the model trained only on synthetic shapes still finds 86 percent of objects in the top 1000, showing that the closed-boundary cue transfers. Heat-maps concentrate on objects rather than texture.",
   "(~50 s) Ablations: the simple gradient mask is as good as Sobel; RGB is the best colour space; two bits of gradient already suffice; very little training data is needed because the model has only 64 weights. The Numba bitwise kernel is several times faster than numpy. Main limitation: coarse boxes, so recall drops at strict IoU.",
   "(~30 s) Summary numbers, future work, and thank you. Offer the live demo: python scripts/demo.py --webcam.",

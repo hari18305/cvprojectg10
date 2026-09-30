@@ -13,7 +13,7 @@
 **Base paper:** M.-M. Cheng, Z. Zhang, W.-Y. Lin, P. H. S. Torr, *"BING: Binarized Normed Gradients for Objectness Estimation at 300fps,"* CVPR 2014.
 **Base repository:** [torrvision/Objectness](https://github.com/torrvision/Objectness) (C++). This project re-implements the method from scratch in Python (OpenCV, NumPy, scikit-learn, Numba). It does not use any deep learning.
 
-**Presentation:** [`presentation/BING_Objectness_Group10.pptx`](presentation/BING_Objectness_Group10.pptx), 18 slides with speaker notes. A PDF export is also included.
+**Presentation:** [`presentation/BING_Objectness_Group10.pptx`](presentation/BING_Objectness_Group10.pptx), 12 slides for a 10-minute talk, following the five required sections (introduction, problem definition, proposed solution and novelty, design and solution, result analysis), with timed speaker notes. A PDF export is also included.
 
 ---
 
