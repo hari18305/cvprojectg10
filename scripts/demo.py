@@ -1,0 +1,79 @@
+"""Run BING on any image (or webcam) and visualise the top object proposals.
+
+  python scripts/demo.py --image data/real/coffee.jpg --top 20
+  python scripts/demo.py --webcam
+"""
+import argparse
+import os
+import sys
+import time
+
+import cv2
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from bing import BING  # noqa: E402
+from bing.datasets import ROOT  # noqa: E402
+
+DEFAULT_MODEL = os.path.join(ROOT, "models", "bing_synthetic_rgb.pkl")
+
+
+def draw(img, boxes, scores, top):
+    out = img.copy()
+    cmap = cv2.applyColorMap(np.linspace(255, 0, top).astype(np.uint8)[:, None], cv2.COLORMAP_JET)[:, 0]
+    for i in range(min(top, len(boxes)) - 1, -1, -1):
+        x1, y1, x2, y2 = boxes[i].astype(int)
+        c = tuple(int(v) for v in cmap[i])
+        cv2.rectangle(out, (x1, y1), (x2, y2), c, 2 if i < 5 else 1)
+        if i < 5:
+            cv2.putText(out, f"#{i + 1}", (x1 + 3, y1 + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, c, 1, cv2.LINE_AA)
+    return out
+
+
+def heat_overlay(img, model):
+    heat = model.objectness_heatmap(img)
+    hm = cv2.applyColorMap((heat * 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
+    return cv2.addWeighted(img, 0.45, hm, 0.55, 0)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--image")
+    ap.add_argument("--webcam", action="store_true")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--top", type=int, default=20)
+    ap.add_argument("--out", default=os.path.join(ROOT, "results", "demo"))
+    a = ap.parse_args()
+    model = BING.load(a.model)
+
+    if a.webcam:
+        cap = cv2.VideoCapture(0)
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            t = time.perf_counter()
+            b, s = model.propose(frame, top=a.top)
+            fps = 1 / (time.perf_counter() - t)
+            vis = draw(frame, b, s, a.top)
+            cv2.putText(vis, f"BING {fps:.0f} fps", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.imshow("BING objectness", vis)
+            if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+                break
+        return
+
+    img = cv2.imread(a.image)
+    model.propose(img)  # JIT warm-up
+    t = time.perf_counter()
+    b, s = model.propose(img)
+    dt = time.perf_counter() - t
+    print(f"{len(b)} proposals in {dt * 1e3:.1f} ms ({1 / dt:.0f} fps)")
+    os.makedirs(a.out, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(a.image))[0]
+    cv2.imwrite(os.path.join(a.out, f"{stem}_top{a.top}.jpg"), draw(img, b, s, a.top))
+    cv2.imwrite(os.path.join(a.out, f"{stem}_heat.jpg"), heat_overlay(img, model))
+    print("saved to", a.out)
+
+
+if __name__ == "__main__":
+    main()
