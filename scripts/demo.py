@@ -2,6 +2,12 @@
 
   python scripts/demo.py --image data/real/coffee.jpg --top 20
   python scripts/demo.py --webcam
+  python scripts/demo.py --image photo.jpg --model voc     # model trained on PASCAL VOC 2007
+
+Models: "synthetic" (default) ranks distinct objects highest, so its top 20 boxes make the
+clearest picture. "voc" finds more objects within 1000 proposals (96.6% vs 87.9% on our real
+photos) but ranks large, near full-image boxes first, as VOC objects are mostly large.
+A path to any saved .pkl model also works.
 """
 import argparse
 import os
@@ -15,7 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bing import BING  # noqa: E402
 from bing.datasets import ROOT  # noqa: E402
 
-DEFAULT_MODEL = os.path.join(ROOT, "models", "bing_synthetic_rgb.pkl")
+MODELS = {
+    "synthetic": os.path.join(ROOT, "models", "bing_synthetic_rgb.pkl"),
+    "voc": os.path.join(ROOT, "models", "bing_voc_rgb_released_sizes_greedy.pkl"),
+}
 
 
 def draw(img, boxes, scores, top):
@@ -40,11 +49,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--image")
     ap.add_argument("--webcam", action="store_true")
-    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--model", default="synthetic", help="synthetic, voc, or a path to a .pkl model")
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--out", default=os.path.join(ROOT, "results", "demo"))
     a = ap.parse_args()
-    model = BING.load(a.model)
+    if not a.webcam and not a.image:
+        ap.error("give --image PATH or --webcam")
+    model_path = MODELS.get(a.model, a.model)
+    if not os.path.exists(model_path):
+        ap.error(f"model not found: {a.model} (use synthetic, voc, or a .pkl path)")
+    model = BING.load(model_path)
+    print("model:", os.path.relpath(model_path, ROOT))
 
     if a.webcam:
         cap = cv2.VideoCapture(0)
@@ -63,6 +78,8 @@ def main():
         return
 
     img = cv2.imread(a.image)
+    if img is None:
+        ap.error(f"could not read image: {a.image}")
     model.propose(img)  # JIT warm-up
     t = time.perf_counter()
     b, s = model.propose(img)

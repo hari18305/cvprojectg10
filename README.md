@@ -71,6 +71,7 @@ pip install -r requirements.txt
 # Try it on an image. Writes results/demo/<name>_top20.jpg and <name>_heat.jpg
 python scripts/demo.py --image data/real/coffee.jpg --top 20
 python scripts/demo.py --webcam                     # live demo
+python scripts/demo.py --image photo.jpg --model voc   # model trained on PASCAL VOC 2007
 
 # Reproduce everything (about 25 min on 4 CPU cores)
 python scripts/make_synthetic.py                    # 600 train / 300 test scenes
