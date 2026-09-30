@@ -1,0 +1,12 @@
+{
+ "astronaut.jpg": ["person", "object", "vehicle", "object"],
+ "chelsea.jpg": ["animal"],
+ "coffee.jpg": ["object", "object", "object"],
+ "coins.jpg": ["coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin", "coin"],
+ "rocket.jpg": ["vehicle", "structure", "structure", "structure", "structure"],
+ "camera.jpg": ["person", "object", "object", "structure"],
+ "motorcycle.jpg": ["vehicle", "furniture", "object", "object", "object", "object", "vehicle"],
+ "china.jpg": ["structure", "plant", "plant"],
+ "flower.jpg": ["plant", "plant"],
+ "grace_hopper.jpg": ["person", "object", "object", "object", "object"]
+}

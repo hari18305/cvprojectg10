@@ -53,7 +53,11 @@ def _background(rng, tex, H, W):
     return img8.astype(np.float32) / 255.0
 
 
+SHAPE_NAMES = ("ellipse", "rounded_rect", "polygon", "star", "blob")
+
+
 def _shape_mask(rng, w, h):
+    """Return (soft mask in [0,1], index into SHAPE_NAMES)."""
     m = np.zeros((h, w), np.uint8)
     kind = rng.integers(5)
     if kind == 0:  # ellipse
@@ -77,7 +81,7 @@ def _shape_mask(rng, w, h):
         pts = (pts - pts.min(0)) / (pts.max(0) - pts.min(0) + 1e-9)
         pts = (pts * [w - 1, h - 1]).astype(np.int32)
         cv2.fillPoly(m, [pts], 255, cv2.LINE_AA)
-    return m.astype(np.float32) / 255.0
+    return m.astype(np.float32) / 255.0, int(kind)
 
 
 def _object_appearance(rng, tex, w, h, bg_mean):
@@ -104,7 +108,7 @@ def _object_appearance(rng, tex, w, h, bg_mean):
 def synth_scene(rng, tex):
     H, W = int(rng.integers(240, 400)), int(rng.integers(320, 500))
     img = _background(rng, tex, H, W)
-    boxes = []
+    boxes, kinds = [], []
     for _ in range(int(rng.integers(1, 6))):
         for _try in range(20):
             s = np.exp(rng.uniform(np.log(24), np.log(0.9 * min(H, W))))
@@ -124,7 +128,8 @@ def synth_scene(rng, tex):
             break
         else:
             continue
-        m = _shape_mask(rng, w, h)[..., None]
+        m, kind = _shape_mask(rng, w, h)
+        m = m[..., None]
         bgm = img[y:y + h, x:x + w].reshape(-1, 3).mean(0)
         app = _object_appearance(rng, tex, w, h, bgm)
         if rng.random() < 0.5:  # dark outline
@@ -134,24 +139,28 @@ def synth_scene(rng, tex):
         img[y:y + h, x:x + w] = img[y:y + h, x:x + w] * (1 - m) + app * m
         ys, xs = np.nonzero(m[..., 0] > 0.5)
         boxes.append([x + xs.min(), y + ys.min(), x + xs.max() + 1, y + ys.max() + 1])
+        kinds.append(SHAPE_NAMES[kind])
     img = np.clip(img + rng.normal(0, rng.uniform(0.005, 0.03), img.shape), 0, 1)
     img = cv2.GaussianBlur(img, (0, 0), rng.uniform(0.3, 1.0))
     img8 = (img * 255).astype(np.uint8)
-    return img8, np.array(boxes, float).reshape(-1, 4)
+    return img8, np.array(boxes, float).reshape(-1, 4), kinds
 
 
 def make_synthetic(out_dir, n, seed):
     rng = np.random.default_rng(seed)
     tex = _textures()
     os.makedirs(out_dir, exist_ok=True)
-    ann = {}
+    ann, cats = {}, {}
     for i in range(n):
-        img, boxes = synth_scene(rng, tex)
+        img, boxes, kinds = synth_scene(rng, tex)
         name = f"{i:05d}.jpg"
         cv2.imwrite(os.path.join(out_dir, name), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
         ann[name] = boxes.tolist()
+        cats[name] = kinds
     with open(os.path.join(out_dir, "annotations.json"), "w") as f:
         json.dump(ann, f)
+    with open(os.path.join(out_dir, "categories.json"), "w") as f:
+        json.dump(cats, f)
 
 
 class JsonDataset:
@@ -162,6 +171,11 @@ class JsonDataset:
         with open(os.path.join(folder, "annotations.json")) as f:
             self.ann = json.load(f)
         self.names = sorted(self.ann)[:limit]
+        cat_path = os.path.join(folder, "categories.json")
+        self.categories = None  # {filename: [category of each box]} when available
+        if os.path.exists(cat_path):
+            with open(cat_path) as f:
+                self.categories = json.load(f)
 
     def __len__(self):
         return len(self.names)
