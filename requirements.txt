@@ -1,5 +1,6 @@
-numpy>=1.26
-opencv-contrib-python-headless>=4.8   # contrib is only needed for the Selective Search baseline
+numpy>=2.0                            # np.bitwise_count (numpy fallback of the bitwise scorer)
+opencv-contrib-python>=4.8            # with GUI for the webcam demo; contrib adds Selective Search
+                                      # on a server without a display: opencv-contrib-python-headless
 scikit-learn>=1.3
 scikit-image>=0.22                    # textures for the synthetic dataset
 matplotlib>=3.7
