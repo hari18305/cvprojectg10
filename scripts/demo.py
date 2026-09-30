@@ -1,7 +1,7 @@
 """Run BING on any image (or webcam) and visualise the top object proposals.
 
   python scripts/demo.py --image data/real/coffee.jpg --top 20
-  python scripts/demo.py --webcam
+  python scripts/demo.py --webcam            # press q to quit; --camera 1 for a second camera
   python scripts/demo.py --image photo.jpg --model voc     # model trained on PASCAL VOC 2007
 
 Models: "synthetic" (default) ranks distinct objects highest, so its top 20 boxes make the
@@ -45,10 +45,29 @@ def heat_overlay(img, model):
     return cv2.addWeighted(img, 0.45, hm, 0.55, 0)
 
 
+def open_camera(index):
+    """Open a webcam and check it really delivers frames. On Windows the default
+    Media Foundation backend sometimes opens but cannot grab frames, so fall back
+    to DirectShow."""
+    backends = [cv2.CAP_ANY]
+    if sys.platform.startswith("win"):
+        backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF]
+    for backend in backends:
+        cap = cv2.VideoCapture(index, backend)
+        if cap.isOpened():
+            for _ in range(10):  # some cameras need a few frames to warm up
+                ok, _frame = cap.read()
+                if ok:
+                    return cap
+        cap.release()
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--image")
     ap.add_argument("--webcam", action="store_true")
+    ap.add_argument("--camera", type=int, default=0, help="webcam index (try 1 if 0 fails)")
     ap.add_argument("--model", default="synthetic", help="synthetic, voc, or a path to a .pkl model")
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--out", default=os.path.join(ROOT, "results", "demo"))
@@ -62,10 +81,15 @@ def main():
     print("model:", os.path.relpath(model_path, ROOT))
 
     if a.webcam:
-        cap = cv2.VideoCapture(0)
+        cap = open_camera(a.camera)
+        if cap is None:
+            sys.exit(f"Could not read frames from camera {a.camera}. Close other apps using it "
+                     "(Teams, Zoom, browser), check Windows Settings > Privacy > Camera "
+                     "(allow desktop apps), or try --camera 1.")
         while True:
             ok, frame = cap.read()
             if not ok:
+                print("Camera stopped sending frames.")
                 break
             t = time.perf_counter()
             b, s = model.propose(frame, top=a.top)
