@@ -2,6 +2,7 @@
 
   python scripts/demo.py --image data/real/coffee.jpg --top 20
   python scripts/demo.py --webcam            # press q to quit; --camera 1 for a second camera
+  python scripts/demo.py --list-cameras       # which camera numbers work (e.g. a USB webcam)
   python scripts/demo.py --image photo.jpg --model voc     # model trained on PASCAL VOC 2007
 
 Models: "synthetic" (default) ranks distinct objects highest, so its top 20 boxes make the
@@ -67,11 +68,24 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--image")
     ap.add_argument("--webcam", action="store_true")
-    ap.add_argument("--camera", type=int, default=0, help="webcam index (try 1 if 0 fails)")
+    ap.add_argument("--camera", type=int, default=0, help="webcam number (built-in is usually 0, USB 1)")
+    ap.add_argument("--list-cameras", action="store_true", help="show which camera numbers deliver frames")
     ap.add_argument("--model", default="synthetic", help="synthetic, voc, or a path to a .pkl model")
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--out", default=os.path.join(ROOT, "results", "demo"))
     a = ap.parse_args()
+    if a.list_cameras:
+        found = False
+        for i in range(5):
+            cap = open_camera(i)
+            if cap is not None:
+                w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                print(f"camera {i}: working ({w}x{h})  ->  python scripts/demo.py --webcam --camera {i}")
+                cap.release()
+                found = True
+        if not found:
+            print("No working camera found (checked 0-4).")
+        return
     if not a.webcam and not a.image:
         ap.error("give --image PATH or --webcam")
     model_path = MODELS.get(a.model, a.model)
