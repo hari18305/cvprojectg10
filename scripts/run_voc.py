@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bing import BING, ProposalEvaluator  # noqa: E402
 from bing.datasets import ROOT, VOCDataset  # noqa: E402
+from bing.model import BASE_SIZES, RELEASED_SIZES  # noqa: E402
 from run_experiments import random_boxes, selective_search  # noqa: E402
 from run_tier1 import Breakdown  # noqa: E402
 
@@ -83,13 +84,26 @@ def main():
     ap.add_argument("--voc-root", required=True)
     ap.add_argument("--orig", help="authors' code folder, after run_original.sh")
     ap.add_argument("--ss-images", type=int, default=300)
+    ap.add_argument("--sizes", choices=["paper", "released"], default="paper",
+                    help="paper: {10..320}, windows larger than the image skipped; "
+                         "released: {16..512} clipped to the image, as in the authors' code")
+    ap.add_argument("--only-ours", action="store_true", help="skip baselines, add to results/voc.json")
     a = ap.parse_args()
-    R = {}
-    model_path = os.path.join(ROOT, "models", "bing_voc_rgb.pkl")
+    out = os.path.join(ROOT, "results", "voc.json")
+    R = json.load(open(out)) if (a.only_ours and os.path.exists(out)) else {}
+    tag = "BING (ours)" if a.sizes == "paper" else "BING (ours, released-code sizes)"
+    model_path = os.path.join(ROOT, "models", f"bing_voc_rgb{'' if a.sizes == 'paper' else '_released_sizes'}.pkl")
 
     t0 = time.time()
-    model = BING(interp="linear").train(VOCDataset(a.voc_root, "trainval"))
-    R["train_seconds"] = time.time() - t0
+    if a.sizes == "paper":
+        model = BING(interp="linear")
+    else:
+        model = BING(sizes=RELEASED_SIZES, clip_large=True, interp="linear")
+    model.train(VOCDataset(a.voc_root, "trainval"))
+    R.setdefault("train_seconds", {})
+    if not isinstance(R["train_seconds"], dict):
+        R["train_seconds"] = {"BING (ours)": R["train_seconds"]}
+    R["train_seconds"][tag] = time.time() - t0
     R["n_train"] = len(VOCDataset(a.voc_root, "trainval"))
     model.save(model_path)
 
@@ -98,8 +112,13 @@ def main():
     print(f"test: {R['n_test']} images, {R['n_objects']} objects", flush=True)
     model.propose(cv2.imread(os.path.join(a.voc_root, "JPEGImages", test[0][0] + ".jpg")))  # JIT warm-up
 
-    R["BING (ours)"] = r = evaluate(lambda i, img: model.propose(img)[0], test, a.voc_root)
-    brief("BING (ours)", r)
+    R[tag] = r = evaluate(lambda i, img: model.propose(img)[0], test, a.voc_root)
+    brief(tag, r)
+    if a.only_ours:
+        with open(out, "w") as f:
+            json.dump(R, f, indent=1)
+        print("saved results/voc.json")
+        return
     if a.orig:
         r = evaluate(lambda i, img: load_original(a.orig, i), test, a.voc_root, timed=False)
         log = os.path.join(a.orig, "run.log")
@@ -120,7 +139,7 @@ def main():
     R["BING (ours) @SS subset"] = r = evaluate(lambda i, img: model.propose(img)[0], sub, a.voc_root)
     brief("BING (ours) same subset", r)
 
-    with open(os.path.join(ROOT, "results", "voc.json"), "w") as f:
+    with open(out, "w") as f:
         json.dump(R, f, indent=1)
     print("saved results/voc.json")
 

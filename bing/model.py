@@ -19,18 +19,23 @@ from .fast import HAVE_NUMBA, binary_scores_fast, normed_gradient_fast
 from .features import FEAT, box_feature, normed_gradient, resize, to_colorspace
 from .metrics import iou_matrix
 
-BASE_SIZES = (10, 20, 40, 80, 160, 320)
+BASE_SIZES = (10, 20, 40, 80, 160, 320)      # window sizes given in the paper
+RELEASED_SIZES = (16, 32, 64, 128, 256, 512)  # sizes used by the authors' released code
 
 
 class BING:
     def __init__(self, sizes=BASE_SIZES, colorspace="RGB", kernel="simple",
                  binary=True, n_basis=2, n_bits=4, per_size=130, nms_radius=2,
-                 C=10.0, interp="area", backend="numba", seed=0):
+                 C=10.0, interp="area", backend="numba", clip_large=False, seed=0):
         self.sizes = [(w, h) for w in sizes for h in sizes]
         self.colorspace, self.kernel = colorspace, kernel
         self.binary, self.n_basis, self.n_bits = binary, n_basis, n_bits
         self.per_size, self.nms_radius, self.C = per_size, nms_radius, C
         self.interp = interp
+        # clip_large: as in the authors' code, keep windows up to 2x the image size and
+        # clip them to the image (so near full-image boxes exist); otherwise skip windows
+        # more than 1.3x larger than the image.
+        self.clip_large = clip_large
         self.backend = backend if HAVE_NUMBA else "numpy"
         self.rng = np.random.default_rng(seed)
         self.w = None
@@ -153,8 +158,14 @@ class BING:
         """Yield (size, boxes, stage-I scores) for each quantised size."""
         im = self._prep(img)
         H, W = im.shape[:2]
-        for (w, h) in (sizes or self.sizes):
-            if w > W * 1.3 or h > H * 1.3:
+        clip = getattr(self, "clip_large", False)
+        for size in (sizes or self.sizes):
+            w, h = size
+            if clip:
+                if w > W * 2 or h > H * 2:
+                    continue
+                w, h = min(w, W), min(h, H)
+            elif w > W * 1.3 or h > H * 1.3:
                 continue
             rw, rh = int(round(FEAT * W / w)), int(round(FEAT * H / h))
             if rw < FEAT or rh < FEAT:
@@ -165,7 +176,7 @@ class BING:
             sx, sy = W / rw, H / rh
             x1, y1 = xs * sx, ys * sy
             bxs = np.stack([x1, y1, np.minimum(x1 + w, W), np.minimum(y1 + h, H)], 1)
-            yield (w, h), bxs, sc
+            yield size, bxs, sc  # key = nominal size, so calibration is per quantised size
 
     def propose(self, img, top=None, calibrate=True, max_side=500):
         """Return (boxes [N,4] as x1,y1,x2,y2, objectness scores) sorted by score.
