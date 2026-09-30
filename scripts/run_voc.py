@@ -87,18 +87,22 @@ def main():
     ap.add_argument("--sizes", choices=["paper", "released"], default="paper",
                     help="paper: {10..320}, windows larger than the image skipped; "
                          "released: {16..512} clipped to the image, as in the authors' code")
+    ap.add_argument("--nms", choices=["local_max", "greedy"], default="local_max",
+                    help="greedy = the authors' non-maximum suppression")
     ap.add_argument("--only-ours", action="store_true", help="skip baselines, add to results/voc.json")
     a = ap.parse_args()
     out = os.path.join(ROOT, "results", "voc.json")
     R = json.load(open(out)) if (a.only_ours and os.path.exists(out)) else {}
-    tag = "BING (ours)" if a.sizes == "paper" else "BING (ours, released-code sizes)"
-    model_path = os.path.join(ROOT, "models", f"bing_voc_rgb{'' if a.sizes == 'paper' else '_released_sizes'}.pkl")
+    extras = [x for x, on in (("released-code sizes", a.sizes == "released"), ("greedy NMS", a.nms == "greedy")) if on]
+    tag = "BING (ours" + "".join(", " + x for x in extras) + ")"
+    suffix = ("_released_sizes" if a.sizes == "released" else "") + ("_greedy" if a.nms == "greedy" else "")
+    model_path = os.path.join(ROOT, "models", f"bing_voc_rgb{suffix}.pkl")
 
     t0 = time.time()
     if a.sizes == "paper":
-        model = BING(interp="linear")
+        model = BING(interp="linear", nms=a.nms)
     else:
-        model = BING(sizes=RELEASED_SIZES, clip_large=True, interp="linear")
+        model = BING(sizes=RELEASED_SIZES, clip_large=True, interp="linear", nms=a.nms)
     model.train(VOCDataset(a.voc_root, "trainval"))
     R.setdefault("train_seconds", {})
     if not isinstance(R["train_seconds"], dict):

@@ -15,7 +15,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 
 from .binary import BinaryScorer
-from .fast import HAVE_NUMBA, binary_scores_fast, normed_gradient_fast
+from .fast import HAVE_NUMBA, binary_scores_fast, greedy_nms, normed_gradient_fast
 from .features import FEAT, box_feature, normed_gradient, resize, to_colorspace
 from .metrics import iou_matrix
 
@@ -26,7 +26,7 @@ RELEASED_SIZES = (16, 32, 64, 128, 256, 512)  # sizes used by the authors' relea
 class BING:
     def __init__(self, sizes=BASE_SIZES, colorspace="RGB", kernel="simple",
                  binary=True, n_basis=2, n_bits=4, per_size=130, nms_radius=2,
-                 C=10.0, interp="area", backend="numba", clip_large=False, seed=0):
+                 C=10.0, interp="area", backend="numba", clip_large=False, nms="greedy", seed=0):
         self.sizes = [(w, h) for w in sizes for h in sizes]
         self.colorspace, self.kernel = colorspace, kernel
         self.binary, self.n_basis, self.n_bits = binary, n_basis, n_bits
@@ -36,6 +36,10 @@ class BING:
         # clip them to the image (so near full-image boxes exist); otherwise skip windows
         # more than 1.3x larger than the image.
         self.clip_large = clip_large
+        # nms: "greedy" is the authors' suppression (accept the best window, block its
+        # neighbourhood, repeat); "local_max" keeps only strict local maxima of each score
+        # map (our first version, which drops good windows on smooth score maps).
+        self.nms = nms
         self.backend = backend if HAVE_NUMBA else "numpy"
         self.rng = np.random.default_rng(seed)
         self.w = None
@@ -146,6 +150,8 @@ class BING:
 
     def _nms_topk(self, sm, k):
         r = self.nms_radius
+        if getattr(self, "nms", "local_max") == "greedy":
+            return greedy_nms(sm, r, k)
         dil = cv2.dilate(sm, np.ones((2 * r + 1, 2 * r + 1), np.uint8))
         ys, xs = np.nonzero(sm >= dil)
         sc = sm[ys, xs]

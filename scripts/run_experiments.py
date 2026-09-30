@@ -212,6 +212,7 @@ def main():
         run("colour=LAB", BING(colorspace="LAB").train(train, verbose=False))
         run("gradient=Sobel 3x3", BING(kernel="sobel").train(train, verbose=False))
         run("resize=bilinear", BING(interp="linear").train(train, verbose=False))
+        run("NMS=local maxima", BING(nms="local_max").train(train, verbose=False))
         for nw in (1, 2, 3, 4):
             m = BING.load(os.path.join(ROOT, "models", f"bing_{tag}_rgb.pkl"), n_basis=nw)
             m._train_stage2(train)

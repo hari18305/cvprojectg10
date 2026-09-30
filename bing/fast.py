@@ -82,6 +82,61 @@ if HAVE_NUMBA:
         return out
 
 
+if HAVE_NUMBA:
+    @njit(cache=True)
+    def _greedy_nms(sm, order, radius, k):
+        """The authors' non-maximum suppression: visit windows from the highest score
+        down, accept a window unless an accepted one lies within `radius` map cells,
+        stop after k windows."""
+        H, W = sm.shape
+        blocked = np.zeros((H, W), np.bool_)
+        ys = np.empty(k, np.int64)
+        xs = np.empty(k, np.int64)
+        n = 0
+        for idx in order:
+            y, x = idx // W, idx % W
+            if blocked[y, x]:
+                continue
+            ys[n], xs[n] = y, x
+            n += 1
+            if n >= k:
+                break
+            for yy in range(max(0, y - radius), min(H, y + radius + 1)):
+                for xx in range(max(0, x - radius), min(W, x + radius + 1)):
+                    blocked[yy, xx] = True
+        return ys[:n], xs[:n]
+
+
+def greedy_nms(sm, radius, k):
+    flat = sm.ravel()
+    # Greedy suppression only ever needs the best few thousand windows: sort those first
+    # and fall back to a full sort only if they do not yield k accepted windows.
+    m = k * (2 * radius + 1) ** 2
+    if HAVE_NUMBA and flat.size > 2 * m:
+        top = np.argpartition(-flat, m)[:m]
+        order = top[np.argsort(-flat[top], kind="stable")]
+        ys, xs = _greedy_nms(sm, order, radius, k)
+        if len(ys) >= k or len(ys) == 0:
+            return ys, xs, sm[ys, xs]
+    order = np.argsort(-flat, kind="stable")
+    if HAVE_NUMBA:
+        ys, xs = _greedy_nms(sm, order, radius, k)
+    else:  # plain Python fallback
+        H, W = sm.shape
+        blocked = np.zeros((H, W), bool)
+        ys, xs = [], []
+        for idx in order:
+            y, x = divmod(int(idx), W)
+            if blocked[y, x]:
+                continue
+            ys.append(y), xs.append(x)
+            if len(ys) >= k:
+                break
+            blocked[max(0, y - radius):y + radius + 1, max(0, x - radius):x + radius + 1] = True
+        ys, xs = np.array(ys, int), np.array(xs, int)
+    return ys, xs, sm[ys, xs]
+
+
 def normed_gradient_fast(img):
     if img.ndim == 2:
         img = img[:, :, None]

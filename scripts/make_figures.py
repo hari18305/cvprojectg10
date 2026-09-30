@@ -221,7 +221,7 @@ def ablation_figs(R):
         return
     groups = {
         "Colour space": ["colour=RGB", "colour=HSV", "colour=LAB", "colour=GRAY"],
-        "Gradient / resize": ["colour=RGB", "gradient=Sobel 3x3", "resize=bilinear"],
+        "Gradient / resize / NMS": ["colour=RGB", "gradient=Sobel 3x3", "resize=bilinear", "NMS=local maxima"],
         "Filter bases Nw": ["Nw=1", "Nw=2", "Nw=3", "Nw=4"],
         "Feature bits Ng": ["Ng=1", "Ng=2", "Ng=3", "Ng=4", "Ng=5", "Ng=6"],
         "Proposals per size": ["per-size=10", "per-size=30", "per-size=60", "per-size=130", "per-size=250"],
@@ -238,6 +238,7 @@ def ablation_figs(R):
         for xx, v in zip(x, d1k):
             a.text(xx + 0.2, v + 0.01, f"{v:.2f}", ha="center", fontsize=8.5)
         lab = [k.split("=")[1] if k != "colour=RGB" or g == "Colour space" else "default" for k in keys]
+        lab = ["local-max\nNMS" if l == "local maxima" else l for l in lab]
         if g == "Training images":
             lab[-1] = "600"
         a.set_xticks(x); a.set_xticklabels(lab, fontsize=9)
@@ -311,15 +312,18 @@ def voc_figs():
         return
     V = json.load(open(path))
     fig, axs = plt.subplots(1, 2, figsize=(12, 4.4))
-    methods = [("BING (ours)", SERIES[0]), ("BING (authors' C++)", SERIES[1]),
-               ("Selective Search (fast)", SERIES[4]), ("Random boxes", SERIES[6])]
-    for name, col in methods:
+    FINAL = "BING (ours, released-code sizes, greedy NMS)"
+    methods = [(FINAL, SERIES[0], "-", "BING (ours, final)"),
+               ("BING (ours)", SERIES[0], "--", "BING (ours, first version)"),
+               ("BING (authors' C++)", SERIES[1], "-", "BING (authors' C++)"),
+               ("Selective Search (fast)", SERIES[4], "-", f"Selective Search ({len(V['ss_subset_ids'])} imgs)"),
+               ("Random boxes", SERIES[6], "-", "Random boxes")]
+    for name, col, ls, lab in methods:
         r = V.get(name)
         if not r:
             continue
-        lab = name + (f" ({len(V['ss_subset_ids'])} imgs)" if name.startswith("Selective") else "")
-        axs[0].plot(r["curve_n"], r["dr_curve"], color=col, lw=2, label=lab)
-        axs[1].plot(r["curve_n"], r["mabo_curve"], color=col, lw=2, label=lab)
+        axs[0].plot(r["curve_n"], r["dr_curve"], ls, color=col, lw=2, label=lab)
+        axs[1].plot(r["curve_n"], r["mabo_curve"], ls, color=col, lw=2, label=lab)
     axs[0].axhline(0.962, color=INK2, lw=1, ls=":")
     axs[0].text(1.2, 0.975, "paper: 96.2% @1000", fontsize=9, color=INK2)
     for ax, yl, t in ((axs[0], "Detection rate (IoU ≥ 0.5)", "Recall vs #proposals — VOC 2007 test"),
@@ -329,7 +333,7 @@ def voc_figs():
     axs[0].legend(loc="lower right", fontsize=9)
     fig.tight_layout(); save(fig, "voc_curves.png")
 
-    ours, orig = V["BING (ours)"]["by_class"], V.get("BING (authors' C++)", {}).get("by_class", {})
+    ours, orig = V[FINAL]["by_class"], V.get("BING (authors' C++)", {}).get("by_class", {})
     classes = sorted(ours, key=lambda c: ours[c]["dr@1000"])
     fig, ax = plt.subplots(figsize=(12, 4.2))
     x = np.arange(len(classes))
@@ -337,9 +341,10 @@ def voc_figs():
     if orig:
         ax.bar(x + 0.2, [orig[c]["dr@1000"] for c in classes], 0.38, color=SERIES[1], label="BING (authors' C++)")
     ax.set_xticks(x); ax.set_xticklabels(classes, rotation=40, ha="right", fontsize=9.5)
-    ax.set_ylim(0.6, 1.0); ax.set_ylabel("DR@1000"); ax.grid(axis="x", visible=False)
+    lo = min(min(v["dr@1000"] for v in ours.values()), min((v["dr@1000"] for v in orig.values()), default=1))
+    ax.set_ylim(max(0, lo - 0.05), 1.0); ax.set_ylabel("DR@1000"); ax.grid(axis="x", visible=False)
     ax.set_title("Recall at 1000 proposals per VOC class", loc="left")
-    ax.legend(loc="lower right", fontsize=9.5)
+    ax.legend(loc="upper left", fontsize=9.5)
     fig.tight_layout(); save(fig, "voc_per_class.png")
 
 
