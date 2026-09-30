@@ -305,6 +305,44 @@ def tier1_figs():
     fig.tight_layout(rect=(0, 0, 1, 0.93)); save(fig, "tier1_breakdown.png")
 
 
+def voc_figs():
+    path = os.path.join(ROOT, "results", "voc.json")
+    if not os.path.exists(path):
+        return
+    V = json.load(open(path))
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.4))
+    methods = [("BING (ours)", SERIES[0]), ("BING (authors' C++)", SERIES[1]),
+               ("Selective Search (fast)", SERIES[4]), ("Random boxes", SERIES[6])]
+    for name, col in methods:
+        r = V.get(name)
+        if not r:
+            continue
+        lab = name + (f" ({len(V['ss_subset_ids'])} imgs)" if name.startswith("Selective") else "")
+        axs[0].plot(r["curve_n"], r["dr_curve"], color=col, lw=2, label=lab)
+        axs[1].plot(r["curve_n"], r["mabo_curve"], color=col, lw=2, label=lab)
+    axs[0].axhline(0.962, color=INK2, lw=1, ls=":")
+    axs[0].text(1.2, 0.975, "paper: 96.2% @1000", fontsize=9, color=INK2)
+    for ax, yl, t in ((axs[0], "Detection rate (IoU ≥ 0.5)", "Recall vs #proposals — VOC 2007 test"),
+                      (axs[1], "MABO", "Box tightness — VOC 2007 test")):
+        ax.set_xscale("log"); ax.set_ylim(0, 1.02); ax.set_xlabel("Number of proposals (#WIN)")
+        ax.set_ylabel(yl); ax.set_title(t, loc="left")
+    axs[0].legend(loc="lower right", fontsize=9)
+    fig.tight_layout(); save(fig, "voc_curves.png")
+
+    ours, orig = V["BING (ours)"]["by_class"], V.get("BING (authors' C++)", {}).get("by_class", {})
+    classes = sorted(ours, key=lambda c: ours[c]["dr@1000"])
+    fig, ax = plt.subplots(figsize=(12, 4.2))
+    x = np.arange(len(classes))
+    ax.bar(x - 0.2, [ours[c]["dr@1000"] for c in classes], 0.38, color=SERIES[0], label="BING (ours)")
+    if orig:
+        ax.bar(x + 0.2, [orig[c]["dr@1000"] for c in classes], 0.38, color=SERIES[1], label="BING (authors' C++)")
+    ax.set_xticks(x); ax.set_xticklabels(classes, rotation=40, ha="right", fontsize=9.5)
+    ax.set_ylim(0.6, 1.0); ax.set_ylabel("DR@1000"); ax.grid(axis="x", visible=False)
+    ax.set_title("Recall at 1000 proposals per VOC class", loc="left")
+    ax.legend(loc="lower right", fontsize=9.5)
+    fig.tight_layout(); save(fig, "voc_per_class.png")
+
+
 def main(tag="synthetic"):
     R = json.load(open(os.path.join(ROOT, "results", f"results_{tag}.json")))
     curves(R, "test", "dr_curve", "Detection rate (IoU ≥ 0.5)", "dr_synthetic.png", "Recall vs #proposals — synthetic test set")
@@ -318,6 +356,7 @@ def main(tag="synthetic"):
     ablation_figs(R)
     calib_fig(R)
     tier1_figs()
+    voc_figs()
     model = BING.load(os.path.join(ROOT, "models", f"bing_{tag}_rgb.pkl"))
     real = list(get_dataset("real", "test"))
     syn = list(get_dataset("synthetic", "test", 12))
