@@ -31,15 +31,16 @@ def write_xml(path, name, shape, boxes, cats):
                 f"<height>{H}</height><depth>3</depth></size>{objs}</annotation>\n")
 
 
-def write_yml(path, boxes, cats):
+def write_yml(path, boxes, cats, difficult=None):
     """Same structure the authors' xml2yaml/yml.m tools produce (all values as strings)."""
     fs = cv2.FileStorage(path, cv2.FILE_STORAGE_WRITE | cv2.FILE_STORAGE_FORMAT_YAML)
     fs.startWriteStruct("annotation", cv2.FILE_NODE_MAP)
     fs.startWriteStruct("object", cv2.FILE_NODE_SEQ)
-    for b, c in zip(boxes, cats):
+    difficult = difficult or ["0"] * len(boxes)
+    for b, c, d in zip(boxes, cats, difficult):
         fs.startWriteStruct("", cv2.FILE_NODE_MAP)
         fs.write("name", c)
-        fs.write("difficult", "0")
+        fs.write("difficult", str(d))
         fs.startWriteStruct("bndbox", cv2.FILE_NODE_MAP)
         fs.write("xmin", str(int(round(b[0])) + 1))
         fs.write("ymin", str(int(round(b[1])) + 1))
