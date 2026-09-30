@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--orig-synth")
     ap.add_argument("--orig-real")
     ap.add_argument("--orig-real-500")
+    ap.add_argument("--orig-synth-4t", help="same run as --orig-synth with 4 threads (timing only)")
     ap.add_argument("--skip-ss", action="store_true")
     a = ap.parse_args()
     out_path = os.path.join(ROOT, "results", "tier1_synthetic.json")
@@ -133,6 +134,8 @@ def main():
             R[split][tag] = r
             brief(f"[{split}] {tag}", r)
 
+    if a.orig_synth_4t:
+        R["orig_4thread_sec"] = parse_seconds(a.orig_synth_4t)
     with open(out_path, "w") as f:
         json.dump(R, f, indent=1)
     print("saved", out_path)

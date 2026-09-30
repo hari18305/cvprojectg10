@@ -11,7 +11,7 @@
 | Sai Kishen K M | AM.SC.U4CSE23248 |
 
 **Base paper:** M.-M. Cheng, Z. Zhang, W.-Y. Lin, P. H. S. Torr, *"BING: Binarized Normed Gradients for Objectness Estimation at 300fps,"* CVPR 2014.
-**Base repository:** [torrvision/Objectness](https://github.com/torrvision/Objectness) (C++). This project re-implements the method from scratch in Python (OpenCV, NumPy, scikit-learn, Numba). It does not use any deep learning.
+**Base repository:** [torrvision/Objectness](https://github.com/torrvision/Objectness) (C++). This project re-implements the method from scratch in Python (OpenCV, NumPy, scikit-learn, Numba). It does not use any deep learning. The authors' C++ code is also built and run on the same data as a reference (section 5.7).
 
 **Presentation:** [`presentation/BING_Objectness_Group10.pptx`](presentation/BING_Objectness_Group10.pptx), 12 slides for a 10-minute talk, following the five required sections (introduction, problem definition, proposed solution and novelty, design and solution, result analysis), with timed speaker notes. A PDF export is also included.
 
@@ -51,6 +51,9 @@ scripts/
   run_experiments.py  train + every experiment → results/results_<dataset>.json
   make_figures.py     all plots → results/figures/
   demo.py             run on any image or a webcam
+  export_voc_format.py  write our datasets in PASCAL VOC layout (for the authors' code)
+  run_tier1.py        authors' code vs ours, full Selective Search, per-size/shape recall
+baselines/original_bing/  build + run the authors' C++ BING (CLI entry point, OpenCV 4 patch)
 presentation/         slide deck (.pptx + .pdf) and its generator (build_deck.js)
 models/               trained models (RGB / HSV / Gray)
 data/real/            10 real photos with 58 hand-labelled boxes
@@ -80,6 +83,18 @@ To follow the paper's protocol on **PASCAL VOC 2007** (train on `trainval`, test
 python scripts/run_experiments.py --dataset voc --voc-root /path/to/VOCdevkit/VOC2007
 ```
 
+To run the **authors' C++ code** on the same images and compare (needs `cmake`, a C++ compiler and `libopencv-dev`):
+
+```bash
+python scripts/export_voc_format.py --out /tmp/voc_synth                        # synthetic train/test
+python scripts/export_voc_format.py --out /tmp/voc_real500 --test real --max-side 500
+bash baselines/original_bing/run_original.sh /tmp/voc_synth 1                    # 1 thread
+bash baselines/original_bing/run_original.sh /tmp/voc_real500 1
+python scripts/run_tier1.py --orig-synth /tmp/voc_synth --orig-real-500 /tmp/voc_real500
+```
+
+The same `run_original.sh` works on a real VOC 2007 folder.
+
 Using the model from Python:
 
 ```python
@@ -93,7 +108,7 @@ boxes, scores = model.propose(cv2.imread("image.jpg"), top=1000)   # boxes: x1, 
 
 * **Synthetic benchmark** (`data/synthetic`): 600 training and 300 test images of 320–500 px, containing 1–5 objects each (915 test objects). Objects are ellipses, rounded rectangles, polygons and blobs, with random colour, shading, texture and inner parts, and sometimes an outline. Backgrounds are textured or smooth colour fields crossed by random clutter lines, which are strong edges that do not belong to any object. Noise and blur are added.
 * **Real photographs** (`data/real`): 10 natural images that ship with scikit-image, scikit-learn and matplotlib, with 58 hand-labelled boxes (people, cup, saucer, spoon, coins, motorcycle, pagoda, flowers, …). The model never sees a real image during training.
-* **PASCAL VOC 2007**: a loader is included, but the dataset could not be downloaded in our build environment (only package registries were reachable).
+* **PASCAL VOC 2007**: a loader is included and verified on our data exported in VOC format, but the dataset itself could not be downloaded in our build environment.
 
 Metrics: **DR**, the fraction of objects covered by a proposal with IoU ≥ 0.5, reported for N proposals. **MABO** is the mean best IoU per object. **AUC** is the mean DR over a log-spaced #WIN axis from 1 to 5000.
 
@@ -107,11 +122,12 @@ Metrics: **DR**, the fraction of objects covered by a proposal with IoU ≥ 0.5,
 | BING (float filter w) | 82.7 % | 94.6 % | 0.658 | 0.820 |
 | BING stage I only (no calibration) | 73.2 % | 93.8 % | 0.653 | 0.758 |
 | BING-Diversified (RGB + HSV + Gray) | 79.0 % | **97.0 %** | 0.675 | 0.808 |
-| Selective Search, fast mode (60 images)\* | 86.9 % | 96.3 % | **0.885** | 0.778 |
+| BING, authors' C++ code (same data, same evaluator) | 80.2 % | 94.9 % | 0.639 | 0.794 |
+| Selective Search, fast mode (all 300 images) | **88.4 %** | **97.5 %** | **0.895** | 0.796 |
 | Random boxes | 26.3 % | 53.6 % | 0.518 | 0.365 |
 | Sliding windows (random order) | 0.8 % | 7.0 % | 0.314 | 0.052 |
 
-\*On the same 60 images, BING reaches DR@1000 = 97.4 %. Selective Search runs at about 1.5 img/s, compared with about 60 img/s for BING on the same subset.
+Selective Search runs at about 1.4 img/s; our BING at 160 img/s (4 threads) and the authors' C++ BING at 104 img/s (1 thread) or 374 img/s (4 threads).
 
 ### 5.2 Real photographs (58 objects, model trained on synthetic data only)
 
@@ -120,7 +136,9 @@ Metrics: **DR**, the fraction of objects covered by a proposal with IoU ≥ 0.5,
 | **BING (binary)** | 60.3 % | 86.2 % | 0.655 |
 | BING-Diversified | 44.8 % | 91.4 % | 0.658 |
 | BING stage I only | 31.0 % | 75.9 % | 0.606 |
-| Selective Search (fast) | 72.4 % | 100 % | 0.884 |
+| BING, authors' C++ code (images shrunk to 500 px) | 27.6 % | 75.9 % | 0.571 |
+| BING, authors' C++ code (original size) | 29.3 % | 70.7 % | 0.542 |
+| Selective Search (fast) | 77.6 % | 100 % | 0.885 |
 | Random boxes | 24.1 % | 48.3 % | 0.517 |
 
 ### 5.3 Speed (images/s, 4-core CPU, about 450×300 px images, 100 test images)
@@ -156,6 +174,31 @@ Per image, time breaks down as follows: resize 12.9 ms (INTER_AREA), gradient 1.
 4. **The "closed boundary" cue transfers.** A model trained only on synthetic shapes finds 86 % of real objects in its top 1000 proposals.
 5. **In Python, speed depends mostly on engineering.** Resizing dominates the runtime. OpenCV's SIMD float correlation is competitive with our Numba popcount kernel. The paper's 300 fps comes from hand-optimised C++.
 
+### 5.7 Our implementation vs the authors' C++ code
+
+The authors' code ([torrvision/Objectness](https://github.com/torrvision/Objectness)) was built with three small compatibility fixes for OpenCV 4 (`baselines/original_bing/patch_opencv4.sh`; the algorithm is untouched). It was trained on the same 600 synthetic images and tested on the same images, and its proposals were scored with our evaluator.
+
+| | Ours (Python + Numba) | Authors' C++ |
+|---|---|---|
+| DR@100 / DR@1000, synthetic | **84.0 %** / **95.1 %** | 80.2 % / 94.9 % |
+| MABO@1000, synthetic | **0.658** | 0.639 |
+| DR@1000, real photos | **86.2 %** | 75.9 % (shrunk to 500 px) |
+| Speed, 1 thread | – | 104 img/s (9.6 ms) |
+| Speed, 4 threads | 160 img/s | **374 img/s** (2.7 ms) |
+| Window sizes | {10 … 320}² (as in the paper) | {16 … 512}² (powers of two between 10 and 500) |
+
+Our rebuild matches the authors' code in recall and is slightly better at small budgets and on real photos. On the real photos the authors' model misses the largest objects (people, cat, pagoda). The C++ code is about 2.3× faster, which is the gap between Numba and hand-written C++ with hardware popcount.
+
+**Recall by object size and shape** (DR@100, synthetic):
+
+| | small (<32 px) | medium | large (>96 px) | ellipse | rounded rect | blob | polygon | star |
+|---|---|---|---|---|---|---|---|---|
+| Ours | 65 % | 84 % | 94 % | 92 % | 88 % | 82 % | 81 % | 77 % |
+| Authors' C++ | 49 % | 81 % | 95 % | 89 % | 82 % | 79 % | 78 % | 74 % |
+| Selective Search | 84 % | 86 % | 95 % | 91 % | 90 % | 89 % | 90 % | 83 % |
+
+Small objects and thin, star-shaped outlines are the hardest for BING. With 1000 proposals every group reaches at least 91 %.
+
 ### 5.6 Figures
 
 All figures are in `results/figures/`:
@@ -166,11 +209,12 @@ All figures are in `results/figures/`:
 * `calibration.png`: stage II weight per window size
 * `top8_*.png`, `found_*.png`, `heatmaps_real.png`: qualitative results
 * `speed.png`, `stage_time.png`, `ablations.png`
+* `tier1_vs_original.png`, `tier1_breakdown.png`: authors' code vs ours, recall by size and shape
 
 ## 6. Limitations and future work
 
 * Localisation is coarse. Refining the top boxes or adding intermediate window sizes would raise MABO.
-* The full PASCAL VOC 2007 evaluation still has to be run with the provided loader.
+* The full PASCAL VOC 2007 evaluation still has to be run. The official host only serves plain HTTP, which our build environment cannot reach; the loader and scripts are ready (`run_experiments.py --dataset voc`, `run_original.sh`).
 * A SIMD C++/Cython popcount kernel would be needed to reach the paper's 300 fps.
 * Training on real annotated images would close the gap between synthetic and real data.
 * Feeding the proposals into a classifier (HOG + SVM, or a small CNN) would give a complete detector.

@@ -7,6 +7,9 @@ const pptxgen = require("pptxgenjs");
 const ROOT = path.join(__dirname, "..");
 const FIG = (f) => path.join(ROOT, "results", "figures", f);
 const R = JSON.parse(fs.readFileSync(path.join(ROOT, "results", "results_synthetic.json")));
+const R1 = JSON.parse(fs.readFileSync(path.join(ROOT, "results", "tier1_synthetic.json")));
+const T1s = (k) => R1.test["BING (ours)"].by_size[k]["dr@100"];
+const T1o = (k) => R1.test["BING (authors' C++)"].by_size[k]["dr@100"];
 
 const C = {
   dark: "141A24", ink: "1B1F2A", muted: "5B6270", accent: "E8772E", teal: "1C7293",
@@ -228,36 +231,45 @@ const g = (k, m = "1000") => (A[k] ? pct(A[k].dr_at[m]) : "—");
 // ---------------------------------------------------------------- 9 results: comparison with existing models
 {
   const s = base("Comparison with existing methods", SEC[4]);
-  const rows = [["Method", "DR@100", "DR@1k", "MABO@1k", "img/s"]];
-  const order = [["BING (binary) — ours", "BING (binary)"], ["BING-Diversified — ours", "BING-Diversified"], ["BING float filter", "BING (float w)"], ["BING without calibration", "BING stage I only"], ["Selective Search (fast) *", "Selective Search (fast)"], ["Sliding windows", "Sliding windows"], ["Random boxes", "Random boxes"]];
-  order.forEach(([lab, m]) => {
-    const r = T[m];
-    const fps = m === "Random boxes" ? "—" : (m === "BING (binary)" ? sp["numba|binary|linear"].toFixed(0) + " †" : r.fps.toFixed(1));
-    rows.push([lab, pct(r.dr_at["100"]), pct(r.dr_at["1000"]), r.mabo_at["1000"].toFixed(3), fps]);
-  });
+  const T1 = R1.test;
+  const orig = T1["BING (authors' C++)"], ssAll = T1["Selective Search (fast)"];
+  const origFps1 = 1 / orig.sec_per_img_reported;
+  const rows = [["Method (synthetic, 300 images)", "DR@100", "DR@1k", "MABO@1k", "img/s"]];
+  const add = (lab, r, fps) => rows.push([lab, pct(r.dr_at["100"]), pct(r.dr_at["1000"]), r.mabo_at["1000"].toFixed(3), fps]);
+  add("BING — ours (Python + Numba)", B, `${Math.round(sp["numba|binary|linear"])} †`);
+  add("BING-Diversified — ours", T["BING-Diversified"], "—");
+  add("BING — authors' C++ code", orig, `${Math.round(origFps1)} ‡`);
+  add("Selective Search (fast)", ssAll, ssAll.fps.toFixed(1));
+  add("Sliding windows", T["Sliding windows"], "—");
+  add("Random boxes", T["Random boxes"], "—");
   s.addTable(rows.map((r, i) => r.map((c, j) => ({ text: c, options: { bold: i === 0 || i === 1, color: i === 0 ? C.white : C.ink, fill: { color: i === 0 ? C.dark : (i <= 2 ? "FDF1E8" : (i % 2 ? C.white : C.tint)) }, align: j ? "center" : "left" } }))),
-    { x: 0.6, y: 1.65, w: 7.9, colW: [3.1, 1.15, 1.15, 1.25, 1.25], fontFace: BODY, fontSize: 13, rowH: 0.46, border: { type: "solid", color: C.line, pt: 0.5 } });
-  s.addText(`* Selective Search on ${SS.n_images} test images (BING on the same images: DR@1k ${pct(BSS.dr_at["1000"])}). † Controlled speed benchmark (Numba, bilinear); other speeds are end-to-end evaluation timings.`, { x: 0.6, y: 5.5, w: 7.9, h: 0.7, fontFace: BODY, fontSize: 11.5, italic: true, color: C.muted, margin: 0, isTextBox: true });
+    { x: 0.6, y: 1.65, w: 7.9, colW: [3.05, 1.05, 1.05, 1.45, 1.3], fontFace: BODY, fontSize: 13, rowH: 0.46, border: { type: "solid", color: C.line, pt: 0.5 } });
+  s.addText(`All methods scored with the same evaluator on the same images. † 4 threads. ‡ authors' code, 1 thread (${Math.round(origFps1 * orig.sec_per_img_reported / R1.orig_4thread_sec)} img/s on 4 threads). Selective Search timed end-to-end.`, { x: 0.6, y: 5.05, w: 7.9, h: 0.7, fontFace: BODY, fontSize: 11.5, italic: true, color: C.muted, margin: 0, isTextBox: true });
   card(s, 8.9, 1.65, 3.9, 5.05);
   s.addText([
-    { text: "Paper vs ours", options: { bold: true, fontSize: 17, breakLine: true } },
-    { text: "Paper (VOC 2007, C++): DR 96.2% @1000, 99.5% @5000, 300 fps", options: { bullet: true, breakLine: true } },
-    { text: `Ours (synthetic, Python): DR ${pct(B.dr_at["1000"])} @1000, ${Math.round(sp["numba|binary|linear"])} fps`, options: { bullet: true, breakLine: true } },
+    { text: "Paper vs code vs ours", options: { bold: true, fontSize: 17, breakLine: true } },
+    { text: "Paper (VOC 2007): DR 96.2% @1000, 300 fps", options: { bullet: true, breakLine: true } },
+    { text: `Authors' code on our data: ${pct(orig.dr_at["1000"])} @1000`, options: { bullet: true, breakLine: true } },
+    { text: `Ours on our data: ${pct(B.dr_at["1000"])} @1000`, options: { bullet: true, breakLine: true } },
     { text: "Findings", options: { bold: true, fontSize: 17, breakLine: true } },
-    { text: `Calibration adds +${(100 * (B.dr_at["100"] - T["BING stage I only"].dr_at["100"])).toFixed(0)} pts DR@100`, options: { bullet: true, breakLine: true } },
-    { text: "Binary = float accuracy", options: { bullet: true, breakLine: true } },
-    { text: `Selective Search: tighter boxes (MABO ${SS.mabo_at["1000"].toFixed(2)} vs ${B.mabo_at["1000"].toFixed(2)}) but ~${Math.round(BSS.fps / SS.fps)}× slower on the same images`, options: { bullet: true } },
-  ], { x: 9.15, y: 1.85, w: 3.45, h: 4.7, fontFace: BODY, fontSize: 13.5, color: C.ink, valign: "top", margin: 0, paraSpaceAfter: 6, isTextBox: true });
+    { text: `Our rebuild matches the authors' code (+${(100 * (B.dr_at["100"] - orig.dr_at["100"])).toFixed(1)} pts DR@100)`, options: { bullet: true, breakLine: true } },
+    { text: `Selective Search: tighter boxes (MABO ${ssAll.mabo_at["1000"].toFixed(2)}) but ~${Math.round(sp["numba|binary|linear"] / ssAll.fps)}× slower`, options: { bullet: true, breakLine: true } },
+    { text: `Calibration adds +${(100 * (B.dr_at["100"] - T["BING stage I only"].dr_at["100"])).toFixed(0)} pts DR@100; binary = float accuracy`, options: { bullet: true } },
+  ], { x: 9.15, y: 1.85, w: 3.45, h: 4.7, fontFace: BODY, fontSize: 13, color: C.ink, valign: "top", margin: 0, paraSpaceAfter: 6, isTextBox: true });
 }
 
-// ---------------------------------------------------------------- 10 results: real photos
+// ---------------------------------------------------------------- 10 results: real photos + breakdown
 {
-  const s = base("Generalisation to real photographs", SEC[4]);
-  img(s, "found_real.png", 0.5, 1.5, 6.4, 5.5);
-  img(s, "heatmaps_real.png", 7.1, 1.5, 5.7, 3.3);
-  stat(s, 7.2, 5.0, 2.8, pct(BR.dr_at["1000"]), "real objects found in top 1000 (BING)");
-  stat(s, 10.1, 5.0, 2.8, pct(RL["Random boxes"].dr_at["1000"]), "random boxes", C.muted);
-  s.addText("Left: best proposal per object (green = found, red = missed). Right: objectness heat-maps. Trained on synthetic data only.", { x: 7.2, y: 6.55, w: 5.6, h: 0.6, fontFace: BODY, fontSize: 11.5, italic: true, color: C.muted, margin: 0, isTextBox: true });
+  const s = base("Real photos and where BING struggles", SEC[4]);
+  img(s, "tier1_vs_original.png", 0.5, 1.45, 7.4, 2.75);
+  img(s, "tier1_breakdown.png", 0.5, 4.3, 7.4, 2.7);
+  const RT = R1.real;
+  bullets(s, [
+    ["Real photos (no real training): ", `ours ${pct(RT["BING (ours)"].dr_at["1000"])}, authors' code ${pct(RT["BING (authors' C++), shrunk to 500 px"].dr_at["1000"])}, Selective Search ${pct(RT["Selective Search (fast)"].dr_at["1000"])} at 1000 proposals.`],
+    ["Large objects: ", "the authors' code misses the people, cat and pagoda; ours finds them."],
+    ["Small objects are hardest: ", `DR@100 ${pct(T1s("small (<32 px)"))} (ours) vs ${pct(T1o("small (<32 px)"))} (authors' code).`],
+    ["Star-shaped objects ", "(thin, irregular outlines) are hardest for every method."],
+  ], 8.2, 1.6, 4.7, 5.3, 13);
 }
 
 // ---------------------------------------------------------------- 11 results: ablations & speed
@@ -307,8 +319,8 @@ const NOTES = [
   "(~50 s) The whole image is resized once per window size. The bottom row shows the bit planes used as the binarized feature. The filter becomes a weighted sum of +/-1 vectors, the feature becomes 4 bit planes, and the dot product becomes AND plus POPCOUNT: 12 popcounts per window instead of 64 multiply-adds. Unit tests confirm the bitwise score equals the float score.",
   "(~40 s) Data. PASCAL VOC could not be downloaded in our environment, so we generated a synthetic benchmark with ground truth, including distracting clutter, and hand-labelled 58 objects in 10 real photos never used in training. Baselines are Selective Search, sliding windows and random boxes.",
   "(~40 s) RESULT ANALYSIS. Detection rate against number of proposals. BING finds about 95 percent of objects within 1000 proposals, far above random boxes; our diversified variant reaches 97 percent.",
-  "(~60 s) Comparison with existing methods. BING beats sliding windows and random boxes by a wide margin. Selective Search gives tighter boxes but is roughly forty times slower on the same images. Calibration clearly helps at small budgets, and binarization costs no accuracy. Compared with the paper's VOC numbers (96.2 percent at 1000), our recall is in the same range; our speed is lower because we use Python instead of hand-optimised C++.",
-  "(~40 s) On real photographs, the model trained only on synthetic shapes still finds 86 percent of objects in the top 1000, showing that the closed-boundary cue transfers. Heat-maps concentrate on objects rather than texture.",
+  "(~60 s) Comparison. We also built and ran the authors' own C++ code on exactly the same images and scored everything with the same evaluator. Our rebuild matches it: about 95 percent at 1000 proposals for both, and ours is slightly better at 100 proposals. Their C++ is faster (about 100 images per second on one thread, over 350 on four) than our Python (160 on four threads). Selective Search finds slightly more objects with much tighter boxes but is over a hundred times slower. Calibration helps at small budgets and binarization costs no accuracy. The paper reports 96.2 percent on VOC 2007; our numbers are in the same range on our data.",
+  "(~45 s) Top: recall curves for our BING, the authors' code and Selective Search. On real photos our version generalises better than the authors' code, mainly because it handles large objects such as the people and the pagoda. Bottom: breakdown by size and shape on the synthetic set. Small objects are hardest at 100 proposals, and star-shaped objects with thin irregular outlines are hardest for every method.",
   "(~50 s) Ablations: the simple gradient mask is as good as Sobel; RGB is the best colour space; two bits of gradient already suffice; very little training data is needed because the model has only 64 weights. The Numba bitwise kernel is several times faster than numpy. Main limitation: coarse boxes, so recall drops at strict IoU.",
   "(~30 s) Summary numbers, future work, and thank you. Offer the live demo: python scripts/demo.py --webcam.",
 ];
