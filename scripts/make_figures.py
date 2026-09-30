@@ -268,6 +268,43 @@ def calib_fig(R):
     save(fig, "calibration.png")
 
 
+def tier1_figs():
+    path = os.path.join(ROOT, "results", "tier1_synthetic.json")
+    if not os.path.exists(path):
+        return
+    T = json.load(open(path))
+    methods = [("BING (ours)", SERIES[0], "-"), ("BING (authors' C++)", SERIES[1], "-"),
+               ("BING (authors' C++), shrunk to 500 px", SERIES[1], "-"),
+               ("Selective Search (fast)", SERIES[4], "-")]
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.4), sharey=True)
+    for ax, (split, title) in zip(axs, (("test", "Synthetic test set (300 images)"), ("real", "Real photos (10 images)"))):
+        for name, col, ls in methods:
+            r = T[split].get(name)
+            if r:
+                lab = "BING (authors' C++)" if name.startswith("BING (authors") else name
+                ax.plot(r["curve_n"], r["dr_curve"], ls, color=col, lw=2, label=lab)
+        ax.set_xscale("log"); ax.set_ylim(0, 1); ax.set_title(title, loc="left")
+        ax.set_xlabel("Number of proposals (#WIN)")
+    axs[0].set_ylabel("Detection rate (IoU ≥ 0.5)")
+    axs[0].legend(loc="upper left", fontsize=9.5)
+    fig.tight_layout(); save(fig, "tier1_vs_original.png")
+
+    groups = [("by_size", ["small (<32 px)", "medium (32-96 px)", "large (>96 px)"], "Object size"),
+              ("by_category", ["ellipse", "rounded_rect", "blob", "polygon", "star"], "Object shape")]
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.2), gridspec_kw={"width_ratios": [3, 5]})
+    names = [("BING (ours)", SERIES[0]), ("BING (authors' C++)", SERIES[1]), ("Selective Search (fast)", SERIES[4])]
+    for ax, (key, cats, title) in zip(axs, groups):
+        x = np.arange(len(cats))
+        for i, (name, col) in enumerate(names):
+            v = [T["test"][name][key][c]["dr@100"] for c in cats]
+            ax.bar(x + (i - 1) * 0.27, v, 0.25, color=col, label=name)
+        ax.set_xticks(x); ax.set_xticklabels([c.split(" (")[0].replace("_", " ") + (f"\n({c.split(' (')[1]}" if " (" in c else "") for c in cats], fontsize=9.5)
+        ax.set_ylim(0, 1.05); ax.set_title(f"DR@100 by {title.lower()} (synthetic)", loc="left"); ax.grid(axis="x", visible=False)
+    h, l = axs[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=3, fontsize=10, bbox_to_anchor=(0.5, 1.02))
+    fig.tight_layout(rect=(0, 0, 1, 0.93)); save(fig, "tier1_breakdown.png")
+
+
 def main(tag="synthetic"):
     R = json.load(open(os.path.join(ROOT, "results", f"results_{tag}.json")))
     curves(R, "test", "dr_curve", "Detection rate (IoU ≥ 0.5)", "dr_synthetic.png", "Recall vs #proposals — synthetic test set")
@@ -280,6 +317,7 @@ def main(tag="synthetic"):
     speed_figs(R)
     ablation_figs(R)
     calib_fig(R)
+    tier1_figs()
     model = BING.load(os.path.join(ROOT, "models", f"bing_{tag}_rgb.pkl"))
     real = list(get_dataset("real", "test"))
     syn = list(get_dataset("synthetic", "test", 12))

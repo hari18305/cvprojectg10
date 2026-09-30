@@ -17,6 +17,7 @@ import re
 import sys
 import time
 
+import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,7 +58,7 @@ class Breakdown:
 def evaluate(fn, ds, with_breakdown=True):
     ev, bd = ProposalEvaluator(5000), Breakdown()
     for name in ds.names:
-        img = __import__("cv2").imread(os.path.join(ds.folder, name))
+        img = cv2.imread(os.path.join(ds.folder, name))
         gt = np.array(ds.ann[name], float).reshape(-1, 4)
         t = time.perf_counter()
         props = fn(name, img)
@@ -69,15 +70,18 @@ def evaluate(fn, ds, with_breakdown=True):
     return r
 
 
-def load_original(folder, prefix, name):
-    """Read the C++ output: first line = count, then 'score, x1, y1, x2, y2' (1-based)."""
+def load_original(folder, prefix, name, orig_shape):
+    """Read the C++ output: first line = count, then 'score, x1, y1, x2, y2' (1-based).
+    Boxes are mapped back to the original resolution if the export shrank the image."""
+    exported = cv2.imread(os.path.join(folder, "JPEGImages", prefix + os.path.splitext(name)[0] + ".jpg"))
+    scale = orig_shape[1] / exported.shape[1]
     files = glob.glob(os.path.join(folder, "Results", "BBoxes*", prefix + os.path.splitext(name)[0] + ".txt"))
     if not files:
         raise FileNotFoundError(f"no C++ result for {name} in {folder}")
     rows = [list(map(float, l.split(","))) for l in open(files[0]).read().split("\n")[1:] if l.strip()]
     b = np.array([r[1:] for r in rows], float).reshape(-1, 4)
     b[:, :2] -= 1  # back to 0-based, end-exclusive
-    return b
+    return b * scale
 
 
 def parse_seconds(folder):
@@ -98,6 +102,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--orig-synth")
     ap.add_argument("--orig-real")
+    ap.add_argument("--orig-real-500")
     ap.add_argument("--skip-ss", action="store_true")
     a = ap.parse_args()
     out_path = os.path.join(ROOT, "results", "tier1_synthetic.json")
@@ -117,12 +122,16 @@ def main():
             r = evaluate(lambda n, img: selective_search(img), ds)
             R[split]["Selective Search (fast)"] = r
             brief(f"[{split}] Selective Search (all images)", r)
-        orig = a.orig_synth if split == "test" else a.orig_real
-        if orig:
-            r = evaluate(lambda n, img: load_original(orig, "te_", n), ds)
+        runs = {"test": [("BING (authors' C++)", a.orig_synth)],
+                "real": [("BING (authors' C++), original size", a.orig_real),
+                         ("BING (authors' C++), shrunk to 500 px", a.orig_real_500)]}[split]
+        for tag, orig in runs:
+            if not orig:
+                continue
+            r = evaluate(lambda n, img: load_original(orig, "te_", n, img.shape), ds)
             r["sec_per_img_reported"] = parse_seconds(orig)
-            R[split]["BING (authors' C++)"] = r
-            brief(f"[{split}] BING (authors' C++)", r)
+            R[split][tag] = r
+            brief(f"[{split}] {tag}", r)
 
     with open(out_path, "w") as f:
         json.dump(R, f, indent=1)

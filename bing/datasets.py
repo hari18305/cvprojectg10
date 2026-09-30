@@ -208,7 +208,8 @@ class VOCDataset:
                 if int(obj.findtext("difficult", "0")):
                     continue
                 bb = obj.find("bndbox")
-                boxes.append([float(bb.findtext(k)) for k in ("xmin", "ymin", "xmax", "ymax")])
+                x1, y1, x2, y2 = (float(bb.findtext(k)) for k in ("xmin", "ymin", "xmax", "ymax"))
+                boxes.append([x1 - 1, y1 - 1, x2, y2])  # VOC is 1-based, inclusive
             yield img, np.array(boxes, float).reshape(-1, 4)
 
 

@@ -52,7 +52,9 @@ def write_yml(path, boxes, cats):
     fs.release()
 
 
-def export(ds, prefix, out, classes):
+def export(ds, prefix, out, classes, max_side=None):
+    """max_side: shrink larger images (and their boxes) so the longer side is at most
+    this many pixels, matching the pre-processing of our Python pipeline."""
     ids = []
     for name in ds.names:
         img_id = prefix + os.path.splitext(name)[0]
@@ -61,7 +63,13 @@ def export(ds, prefix, out, classes):
         boxes = ds.ann[name]
         cats = ds.categories[name] if ds.categories else ["object"] * len(boxes)
         classes.update(cats)
-        shutil.copy(src, os.path.join(out, "JPEGImages", img_id + ".jpg"))
+        if max_side and max(img.shape[:2]) > max_side:
+            f = max_side / max(img.shape[:2])
+            img = cv2.resize(img, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+            boxes = [[v * f for v in b] for b in boxes]
+            cv2.imwrite(os.path.join(out, "JPEGImages", img_id + ".jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        else:
+            shutil.copy(src, os.path.join(out, "JPEGImages", img_id + ".jpg"))
         write_xml(os.path.join(out, "Annotations", img_id + ".xml"), img_id + ".jpg", img.shape, boxes, cats)
         write_yml(os.path.join(out, "Annotations", img_id + ".yml"), boxes, cats)
         ids.append(img_id)
@@ -72,17 +80,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--test", default="synthetic", choices=["synthetic", "real"])
+    ap.add_argument("--max-side", type=int, help="shrink test images to this longer side")
     a = ap.parse_args()
     for d in ("JPEGImages", "Annotations", "ImageSets/Main"):
         os.makedirs(os.path.join(a.out, d), exist_ok=True)
     classes = set()
     train = export(JsonDataset(os.path.join(ROOT, "data", "synthetic", "train")), "tr_", a.out, classes)
     test_dir = os.path.join(ROOT, "data", "synthetic", "test") if a.test == "synthetic" else os.path.join(ROOT, "data", "real")
-    test = export(JsonDataset(test_dir), "te_", a.out, classes)
+    test = export(JsonDataset(test_dir), "te_", a.out, classes, a.max_side)
     main_dir = os.path.join(a.out, "ImageSets", "Main")
     for fname, items in (("train.txt", train), ("test.txt", test), ("trainval.txt", train), ("class.txt", sorted(classes))):
-        with open(os.path.join(main_dir, fname), "w") as f:
-            f.write("\n".join(items) + "\n")
+        # CRLF: the authors' CmFile::loadStrList drops the last character of each line
+        with open(os.path.join(main_dir, fname), "w", newline="") as f:
+            f.write("".join(i + "\r\n" for i in items))
     print(f"exported {len(train)} train / {len(test)} test images to {a.out}")
 
 
