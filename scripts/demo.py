@@ -75,6 +75,10 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "results", "demo"))
     a = ap.parse_args()
     if a.list_cameras:
+        try:  # probing missing camera numbers makes OpenCV print warnings; hide them
+            cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+        except AttributeError:
+            pass
         found = False
         for i in range(5):
             cap = open_camera(i)
