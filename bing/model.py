@@ -18,7 +18,6 @@ from .binary import BinaryScorer
 from .fast import HAVE_NUMBA, binary_scores_fast, greedy_nms, normed_gradient_fast
 from .features import FEAT, box_feature, normed_gradient, resize, to_colorspace
 from .metrics import iou_matrix
-from .refine import refine_boxes
 
 BASE_SIZES = (10, 20, 40, 80, 160, 320)      # window sizes given in the paper
 RELEASED_SIZES = (16, 32, 64, 128, 256, 512)  # sizes used by the authors' released code
@@ -27,8 +26,7 @@ RELEASED_SIZES = (16, 32, 64, 128, 256, 512)  # sizes used by the authors' relea
 class BING:
     def __init__(self, sizes=BASE_SIZES, colorspace="RGB", kernel="simple",
                  binary=True, n_basis=2, n_bits=4, per_size=130, nms_radius=2,
-                 C=10.0, interp="area", backend="numba", clip_large=False, nms="greedy",
-                 refine=None, seed=0):
+                 C=10.0, interp="area", backend="numba", clip_large=False, nms="greedy", seed=0):
         self.sizes = [(w, h) for w in sizes for h in sizes]
         self.colorspace, self.kernel = colorspace, kernel
         self.binary, self.n_basis, self.n_bits = binary, n_basis, n_bits
@@ -42,9 +40,6 @@ class BING:
         # neighbourhood, repeat); "local_max" keeps only strict local maxima of each score
         # map (our first version, which drops good windows on smooth score maps).
         self.nms = nms
-        # refine: None, or a dict for our gradient-guided box refinement (stage III),
-        # e.g. {"frac": 0.1, "min_gain": 1.0, "iters": 1, "top": 1000}; see bing/refine.py.
-        self.refine = refine
         self.backend = backend if HAVE_NUMBA else "numpy"
         self.rng = np.random.default_rng(seed)
         self.w = None
@@ -214,14 +209,7 @@ class BING:
         o = np.argsort(-s, kind="stable")
         if top:
             o = o[:top]
-        b, s = b[o], s[o]
-        ref = getattr(self, "refine", None)
-        if ref:  # our stage III: gradient-guided refinement of the top boxes
-            k = ref.get("top", 1000)
-            b = b.copy()
-            b[:k] = refine_boxes(img, b[:k], frac=ref.get("frac", 0.1), iters=ref.get("iters", 1),
-                                 min_gain=ref.get("min_gain", 1.0))
-        return b / f, s
+        return b[o] / f, s[o]
 
     def objectness_heatmap(self, img, top=2000):
         """Per-pixel sum of objectness of the top proposals (visualisation)."""
