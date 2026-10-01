@@ -178,7 +178,7 @@ const g = (k, m = "1000") => (A[k] ? pct(A[k].dr_at[m]) : "—");
     s.addText(d, { x: x + 0.2, y: y + 1.24, w: 2.45, h: 0.8, fontFace: BODY, fontSize: 12.5, color: C.muted, margin: 0, valign: "top", isTextBox: true });
     if (col < 3) s.addText("→", { x: x + 2.8, y: y + 0.8, w: 0.3, h: 0.4, fontFace: BODY, fontSize: 20, color: C.soft, align: "center", margin: 0, isTextBox: true });
   });
-  s.addText("Training: stage I is a linear SVM on 8×8 NG features of object boxes vs random background windows; stage II is a 1-D calibration per window size.", { x: 0.6, y: 6.7, w: 12.1, h: 0.4, fontFace: BODY, fontSize: 13, italic: true, color: C.muted, margin: 0, isTextBox: true });
+  s.addText("Training: stage I is a linear SVM on 8×8 NG features of object boxes vs random background windows; stage II is a 1-D calibration per window size.", { x: 0.6, y: 6.5, w: 12.1, h: 0.4, fontFace: BODY, fontSize: 13, italic: true, color: C.muted, margin: 0, isTextBox: true });
 }
 
 // ---------------------------------------------------------------- 6 design: features + binarization
@@ -311,21 +311,56 @@ const g = (k, m = "1000") => (A[k] ? pct(A[k].dr_at[m]) : "—");
   s.addText("Thank you, questions?", { x: 0.6, y: 6.85, w: 6, h: 0.4, fontFace: HEAD, fontSize: 16, italic: true, color: C.white, margin: 0, isTextBox: true });
 }
 
-const NOTES = [
-  "(~30 s) Introduce the group and the topic. We rebuilt and studied BING, a CVPR 2014 method that finds likely object regions at 300 frames per second using only handcrafted gradient features.",
-  "(~45 s) INTRODUCTION. Detection is costly because a sliding-window detector must classify a huge number of windows, and almost all of them are background. Object proposals first select a small set of promising windows. BING does this extremely fast with gradients and bit operations.",
-  "(~45 s) PROBLEM DEFINITION. Read the boxed statement. Input: any image. Output: ranked boxes plus a heat-map. Constraints: class-agnostic, real-time, CPU, no deep learning. We measure success by detection rate at N proposals, box tightness (MABO) and speed.",
-  "(~55 s) PROPOSED SOLUTION & NOVELTY. BING's observation: objects have closed boundaries, so an 8x8 gradient map of an object window shows a ring of edges. A 64-weight linear filter learns that template. Our contributions: a from-scratch Python implementation with a Numba version of the paper's bit-level algorithm; a head-to-head comparison with the authors' own C++ code on PASCAL VOC; finding two implementation details the paper does not state; and a synthetic benchmark, real photos and systematic ablations.",
-  "(~45 s) DESIGN. The eight stages from our proposal. For each of 36 window sizes the image is resized so every 8x8 patch is one window; gradients are computed, binarized and scored with bit operations; greedy suppression and a per-size calibration rank the windows; the top boxes come out.",
-  "(~45 s) The filter becomes a weighted sum of +/-1 vectors, the feature becomes 4 bit planes, and the dot product becomes AND plus POPCOUNT: 12 popcounts per window instead of 64 multiply-adds. Unit tests confirm the bitwise score equals the float score.",
-  "(~40 s) Data. PASCAL VOC 2007 is the paper's benchmark: train on trainval, test on test. We also built a synthetic benchmark with clutter, and hand-labelled 58 objects in 10 real photos never used for training. Baselines include the authors' own C++ code, which we compiled and ran ourselves.",
-  "(~55 s) RESULT ANALYSIS. On VOC 2007 our final BING finds 94 percent of objects in the top 1000 proposals, the same as the authors' code on the same images with the same evaluator. With the authors' own evaluator their code scores 96.0 percent, so the paper's 96.2 percent reproduces. The dashed line is our first version, which stalled at 75 percent; the next slides explain why.",
-  "(~55 s) Comparison. BING finds more objects than Selective Search on VOC at 1000 proposals and is about 70 times faster, but Selective Search draws tighter boxes. Our version matches the authors' code on VOC, generalises better to real photos when trained on synthetic data, and is slightly faster on one thread; their C++ scales better to four threads.",
-  "(~55 s) Our first version followed the paper's text and reached only 75 percent on VOC. Two details come from the released code, not the paper: window sizes up to 512 clipped to the image, and greedy suppression. Each helps; together they close the gap. Bottom: recall per VOC class; small objects such as bottles and potted plants are hardest.",
-  "(~45 s) Ablations on the synthetic set: the simple gradient mask is as good as Sobel, RGB is the best colour space, two bits of gradient suffice, and little training data is needed because the model has only 64 weights. The main limitation is coarse boxes.",
-  "(~30 s) Summary numbers, future work, and thank you. Offer the live demo: python scripts/demo.py --webcam.",
+// ---------------------------------------------------------------- speaker plan + notes
+// Who presents which slides. Change the names here and rebuild to reassign slides.
+const SPEAKERS = ["Abhinav Dileep", "Ayyappadas M T", "Parthiv M", "Hari Sankar A", "Sai Kishen K M"];
+const P = (i) => SPEAKERS[i];
+// [speaker index, target seconds, script]. Each script is written to be read aloud.
+const SCRIPT = [
+  [0, 35, `Good morning. We are Group 10, and our project is "Fast Object Proposal Generation Using Handcrafted Gradient Features". It is based on the CVPR 2014 paper BING, by Cheng, Zhang, Lin and Torr. BING finds the regions of an image that are likely to contain objects, at around 300 frames per second, using only image gradients and bit operations, with no deep learning. I will introduce the problem, and then my teammates will cover our solution, design and results.`],
+  [0, 45, `Why do we need object proposals? A classic detector slides a classifier over every position, every size and every shape of window. That is a hundred thousand windows or more per image, and almost all of them are background. Object proposals solve this. A cheap, class-agnostic score ranks all the windows first, so the expensive detector only has to look at the top thousand or so. BING is one of the fastest ways to do this: the paper reports 300 images per second.`],
+  [0, 40, `Here is our problem definition, in the box: given an image, output a ranked list of boxes that covers as many objects as possible with few boxes, in milliseconds, using only handcrafted features. The constraints: no class labels, real time, CPU only, no deep networks. We measure three things: the detection rate, meaning the share of objects found in the top N boxes; MABO, meaning how tight the boxes are; and speed. We answer where objects are, not what they are.`],
+  [1, 55, `Thank you, Abhinav. BING's key idea is simple: objects have closed outlines. Shrink any window to 8 by 8 pixels and look at its gradient strength, and a window around an object shows a ring of strong edges. A linear model with just 64 weights learns this template; on the right is the filter we learned, positive on the border and negative inside. To make it fast, filter and features are turned into bits. Beyond the paper, we made four contributions, shown in the cards: a from-scratch Python implementation; a head-to-head comparison with the authors' own C++ code; two details the paper's text leaves out, which we found that way; and our own benchmarks and ablations.`],
+  [1, 45, `This is our system design, the same eight stages as in our proposal. The input image is shrunk to at most 500 pixels and converted to a colour space. We consider 36 window sizes. For each size, the whole image is resized so that every 8 by 8 patch corresponds to exactly one window. We compute the gradients, binarize them, and score every window with bit operations. Greedy suppression keeps the best spread-out windows, a per-size calibration makes scores comparable across sizes, and the top boxes come out.`],
+  [2, 50, `Thank you, Ayyappadas. On the left, the top row shows the gradient maps of a coffee-cup image for three window sizes. The bottom row shows the four most significant bit planes of one map. The trick is on the right. The 64-weight filter is approximated by a weighted sum of plus-and-minus-one vectors. Each gradient value is approximated by its top four bits. Each set of 64 bits fits in one 64-bit integer, so a dot product becomes an AND followed by a POPCOUNT. That is 12 popcount operations per window instead of 64 multiply-adds. Our unit tests confirm that the bitwise score exactly equals the score computed with floats.`],
+  [2, 45, `For evaluation we used three datasets. The main one is PASCAL VOC 2007, the paper's own benchmark: we train on 5,011 images and test on 4,952 images with over 12,000 objects. We also generated a synthetic benchmark of 900 images with cluttered backgrounds, and we hand-labelled 58 objects in 10 real photographs that are never used for training. Every method is scored with the same evaluator. As baselines we used the authors' own C++ code, Selective Search, sliding windows and random boxes.`],
+  [3, 55, `Thank you, Parthiv. This is our main result, on PASCAL VOC 2007. Our final BING finds ${pct(VF.dr_at["1000"])} of all objects in its top 1000 proposals. The authors' own C++ code, on the same images with the same evaluator, finds ${pct(VO.dr_at["1000"])}. So our rebuild matches the original. When we use the authors' own evaluator, their code scores 96.0 percent, against 96.2 percent reported in the paper, so the paper's result reproduces. The dashed blue line is our first version. It stopped at 75 percent, and Sai Kishen will explain why in a moment.`],
+  [3, 55, `This table compares BING with other methods. On VOC, BING finds more objects in the top 1000 than Selective Search, ${pct(VF.dr_at["1000"])} against ${pct(V["Selective Search (fast)"].dr_at["1000"])}, and it is about 70 times faster. But Selective Search draws tighter boxes, which shows in the MABO column. Compared with the authors' code, our version has the same accuracy on VOC, generalises better to real photos when trained only on synthetic data, and is slightly faster on one thread, ${Math.round(V.speed_ours["1 thread"])} against ${Math.round(1 / VO.sec_per_img_reported)} images per second. Their C++ code scales better to four threads.`],
+  [4, 55, `Thank you, Hari. Our first version followed the paper's text exactly and reached only 75 percent on VOC. By running the authors' released code, we found two details that are not in the paper. First, window sizes: the paper lists 10 to 320 pixels, but the code uses 16 to 512 and clips large windows to the image, and VOC has many large objects. Second, suppression: we kept only local peaks, but the code uses greedy suppression, which keeps more good windows. As the table shows, each helps, and together they close the gap. Below is recall per VOC class: thin objects like bottles are hardest; cats and dogs are easiest.`],
+  [4, 45, `Our ablation studies show what matters. The simple minus-one, zero, one gradient mask works as well as Sobel. RGB is the best single colour space. Just two bits of gradient are enough. And because the model has only 64 weights, even 10 training images give good results. The main limitation is that BING's boxes are coarse, because the window sizes are powers of two and the stride is 8 pixels, so recall drops when tighter boxes are required.`],
+  [4, 35, `To conclude: simple gradients, a 64-weight linear model and bit operations find 94 percent of objects on PASCAL VOC, matching the authors' own code. Our version works on real photos without real training data, runs at ${Math.round(V.speed_ours["1 thread"])} images per second on one thread, and needs only 12 popcounts per window. In future we would like to make the boxes tighter, speed up multi-threading, and add a classifier to build a complete detector. Thank you. We are happy to take questions, and we can show a live webcam demo.`],
 ];
-NOTES.forEach((t, i) => slides[i] && slides[i].addNotes(t));
+const HANDOVER = [, , "Ayyappadas will now explain our proposed solution.", , "Parthiv will now explain the bit-level trick and our experimental setup.", ,
+  "Hari will now present our results.", , "Sai Kishen will now explain what made the difference, and conclude."];
+// Target time per slide from the script length: 140 words per minute, rounded to 5 s.
+SCRIPT.forEach((r) => { r[1] = Math.max(20, Math.round(r[2].split(/\s+/).length / 140 * 60 / 5) * 5); });
+const fmt = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+const md = ["# Speaker script — Group 10", "",
+  "Generated by `presentation/build_deck.js`; edit `SPEAKERS` / `SCRIPT` there and rebuild to change it.", "",
+  "| Speaker | Slides | Time |", "|---|---|---|"];
+SPEAKERS.forEach((name, k) => {
+  const mine = SCRIPT.map((r, i) => [r, i]).filter(([r]) => r[0] === k);
+  md.push(`| ${name} | ${mine.map(([, i]) => i + 1).join(", ")} | ~${fmt(mine.reduce((a, [r]) => a + r[1], 0))} |`);
+});
+md.push(`| **Total** | 1–${SCRIPT.length} | **~${fmt(SCRIPT.reduce((a, r) => a + r[1], 0))}** |`, "");
+let clock = 0;
+SCRIPT.forEach(([who, sec, text], i) => {
+  const start = clock;
+  clock += sec;
+  const full = HANDOVER[i] ? `${text} ${HANDOVER[i]}` : text;
+  const next = SCRIPT[i + 1];
+  const cue = next && next[0] !== who ? `→ Hand over to ${P(next[0])}.` : "";
+  if (slides[i]) {
+    slides[i].addNotes(`SLIDE ${i + 1} · ${P(who)} · ~${sec} s (clock ${fmt(start)}–${fmt(clock)})\n\n${full}${cue ? "\n\n" + cue : ""}`);
+    if (i > 0) {  // small presenter credit on every slide after the title
+      const last = i === SCRIPT.length - 1;
+      slides[i].addText(`Presented by ${P(who)}`, { x: last ? 7.3 : 0.6, y: last ? 6.9 : 7.08, w: last ? 5.4 : 6, h: 0.28, fontFace: BODY, fontSize: 9.5, color: last ? C.soft : C.muted, align: last ? "right" : "left", margin: 0, isTextBox: true });
+    }
+  }
+  md.push(`## Slide ${i + 1} — ${P(who)} (~${sec} s, ${fmt(start)}–${fmt(clock)})`, "", full, "");
+  if (cue) md.push(`**${cue}**`, "");
+});
+fs.writeFileSync(path.join(__dirname, "SPEAKER_NOTES.md"), md.join("\n"));
 
 const out = path.join(__dirname, "BING_Objectness_Group10.pptx");
 pres.writeFile({ fileName: out }).then(() => console.log("wrote", out));
