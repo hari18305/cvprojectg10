@@ -50,7 +50,7 @@ scripts/
   make_synthetic.py   generate the synthetic benchmark
   run_experiments.py  train + every experiment → results/results_<dataset>.json
   make_figures.py     all plots → results/figures/
-  demo.py             run on any image or a webcam
+  demo.py             run on any image or a webcam (--model, --camera, --list-cameras)
   export_voc_format.py  write our datasets in PASCAL VOC layout (for the authors' code)
   run_tier1.py        authors' code vs ours, full Selective Search, per-size/shape recall
   prepare_voc.py      download PASCAL VOC 2007 and prepare it for both implementations
@@ -58,22 +58,54 @@ scripts/
   measure_speed.py    controlled speed benchmark (1 and 4 threads)
 baselines/original_bing/  build + run the authors' C++ BING (CLI entry point, OpenCV 4 patch)
 presentation/         slide deck (.pptx + .pdf) and its generator (build_deck.js)
-models/               trained models (RGB / HSV / Gray)
+models/               trained models: synthetic (RGB / HSV / Gray) and PASCAL VOC 2007
 data/real/            10 real photos with 58 hand-labelled boxes
 tests/                unit tests (bitwise score == float score, numba == numpy, IoU …)
 ```
 
 ## 3. Quick start
 
+Run these from the project folder (the one containing `scripts/`), with Python 3.10 or newer.
+
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+```
 
-# Try it on an image. Writes results/demo/<name>_top20.jpg and <name>_heat.jpg
-python scripts/demo.py --image data/real/coffee.jpg --top 20
-python scripts/demo.py --webcam                     # live demo
-python scripts/demo.py --image photo.jpg --model voc   # model trained on PASCAL VOC 2007
+**Demo on an image.** Saves two pictures in `results/demo/` (no window opens): `<name>_top20.jpg` with the 20 best boxes, and `<name>_heat.jpg` with the objectness heat-map.
 
-# Reproduce everything (about 25 min on 4 CPU cores)
+```bash
+python scripts/demo.py --image data/real/coffee.jpg
+python scripts/demo.py --image photo.jpg --top 50 --model voc   # 50 boxes, model trained on VOC 2007
+```
+
+`--model synthetic` (default) ranks distinct objects first, so its top boxes make the clearest picture. `--model voc` finds more objects within 1000 proposals but ranks large, near full-image boxes first.
+
+**Live webcam demo.** Opens a window with the top boxes and the frame rate; press `q` to quit.
+
+```bash
+python scripts/demo.py --list-cameras              # which camera numbers deliver frames
+python scripts/demo.py --webcam --camera 1          # e.g. a USB webcam (built-in is usually 0)
+```
+
+The first run takes a few seconds longer while the fast (Numba) code compiles.
+
+**Troubleshooting**
+
+| Problem | Fix |
+|---|---|
+| `pip.exe was blocked by ... policy` | Use `python -m pip ...` instead of `pip ...`. |
+| `The function is not implemented ... imshow` | The display-less OpenCV build is installed. Run the two lines below. |
+| `module 'cv2' has no attribute 'VideoCapture'` | Two OpenCV packages overwrote each other. Run the two lines below. |
+| `can't grab frame` / wrong camera | Close other apps using the camera, allow desktop apps in Windows camera privacy settings, and pick the camera with `--list-cameras` / `--camera N`. |
+
+```bash
+python -m pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless
+python -m pip install --force-reinstall --no-cache-dir "opencv-contrib-python>=4.8,<5"
+```
+
+**Reproduce everything** (synthetic and real-photo experiments, about 25 min on 4 CPU cores):
+
+```bash
 python scripts/make_synthetic.py                    # 600 train / 300 test scenes
 python scripts/run_experiments.py                   # train + evaluate + ablations
 python scripts/make_figures.py                      # figures
