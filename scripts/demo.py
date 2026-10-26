@@ -6,7 +6,8 @@
   python scripts/demo.py --image photo.jpg --model voc     # model trained on PASCAL VOC 2007
   python scripts/demo.py --image photo.jpg --rerank        # + our multi-cue re-ranking (stage III)
   python scripts/demo.py --image photo.jpg --compare       # BING vs re-ranked, side by side
-  python scripts/demo.py --webcam --detect                 # + our HOG/SVM detector (20 VOC classes)
+  python scripts/demo.py --image photo.jpg --detect        # + our detector (20 VOC classes; CNN features
+                                                           #   if torch is installed, else HOG)
 
 Models: "synthetic" (default) ranks distinct objects highest, so its top 20 boxes make the
 clearest picture. "voc" finds more objects within 1000 proposals (96.6% vs 87.9% on our real
@@ -44,10 +45,23 @@ def draw(img, boxes, scores, top):
     return out
 
 
-def draw_detections(img, dets, max_n=8):
+def tidy(dets, max_n=5):
+    """Keep the best few detections for display: drop a box that overlaps a kept box of the
+    same class (IoU > 0.2) or of any class (IoU > 0.6)."""
+    from bing.metrics import iou_matrix
+    kept = []
+    for name, sc, box in dets:
+        if all(iou_matrix([box], [k[2]])[0, 0] <= (0.2 if name == k[0] else 0.6) for k in kept):
+            kept.append((name, sc, box))
+        if len(kept) == max_n:
+            break
+    return kept
+
+
+def draw_detections(img, dets):
     """dets: [(class name, score, box)] sorted by score."""
     out = img.copy()
-    for name, sc, (x1, y1, x2, y2) in dets[:max_n]:
+    for name, sc, (x1, y1, x2, y2) in tidy(dets):
         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
         cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), 2)
         label = f"{name} {sc:.2f}"
@@ -60,13 +74,24 @@ def draw_detections(img, dets, max_n=8):
 class Pipeline:
     """BING, optionally followed by our re-ranking (stage III) and our detector."""
 
-    def __init__(self, model, rerank=False, detect=False, windows=100, min_score=0.0):
-        self.model, self.reranker, self.detector = model, None, None
+    def __init__(self, model, rerank=False, detect=None, windows=100, min_score=0.0):
+        self.model, self.reranker, self.detector, self.cnn = model, None, None, None
         self.windows, self.min_score = windows, min_score
         if rerank or detect:
             with open(os.path.join(ROOT, "models", "rerank_voc.pkl"), "rb") as f:
                 self.reranker = pickle.load(f)
-        if detect:
+        cnn_path = os.path.join(ROOT, "models", "cnn_detector_voc.pkl")
+        if detect == "auto":
+            detect = "cnn" if os.path.exists(cnn_path) and _have_torch() else "hog"
+        self.kind = detect
+        if self.min_score is None:
+            self.min_score = -0.4 if detect == "cnn" else 0.0
+        if detect == "cnn":
+            from bing.cnn import CNNFeatures  # downloads the ResNet-50 weights on first use
+            self.cnn = CNNFeatures()
+            with open(cnn_path, "rb") as f:
+                self.detector = pickle.load(f)
+        elif detect == "hog":
             with open(os.path.join(ROOT, "models", "detector_voc.pkl"), "rb") as f:
                 self.detector = pickle.load(f)
 
@@ -76,12 +101,24 @@ class Pipeline:
             b, s = self.reranker.rerank(img, b, s)
         dets = None
         if self.detector is not None:
-            from bing.detector import box_features
             w = b[: self.windows]
-            per = self.detector.detect(w, self.detector.scores(box_features(img, w)), min_score=self.min_score)
+            if self.cnn is not None:
+                per = self.detector.detect(w, self.cnn.pool(self.cnn.maps(img), w), min_score=self.min_score)
+            else:
+                from bing.detector import box_features
+                per = self.detector.detect(w, self.detector.scores(box_features(img, w)), min_score=self.min_score)
             dets = sorted(((self.detector.classes[j], float(d[0]), d[1:]) for j, a in per.items() for d in a),
                           key=lambda t: -t[1])
         return (b[:top] if top else b), s, dets
+
+
+def _have_torch():
+    try:
+        import torch  # noqa: F401
+        import torchvision  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def heat_overlay(img, model):
@@ -118,10 +155,12 @@ def main():
     ap.add_argument("--top", type=int, default=20)
     ap.add_argument("--rerank", action="store_true", help="add our multi-cue re-ranking (uses the VOC model)")
     ap.add_argument("--compare", action="store_true", help="image only: BING vs re-ranked top boxes side by side")
-    ap.add_argument("--detect", action="store_true",
-                    help="add our detector: HOG + linear SVMs for the 20 VOC classes on the top --windows boxes")
+    ap.add_argument("--detect", nargs="?", const="auto", choices=["auto", "cnn", "hog"],
+                    help="add our detector for the 20 VOC classes on the top --windows boxes: cnn (ResNet-50 "
+                         "features, needs torch), hog, or auto (cnn when available)")
     ap.add_argument("--windows", type=int, default=100, help="boxes the detector looks at (default 100)")
-    ap.add_argument("--min-score", type=float, default=0.0, help="detector score threshold (default 0)")
+    ap.add_argument("--min-score", type=float, default=None,
+                    help="detector score threshold (default: -0.4 for cnn, 0 for hog)")
     ap.add_argument("--out", default=os.path.join(ROOT, "results", "demo"))
     ap.add_argument("--show", action="store_true", help="image mode: also open the results in a window")
     a = ap.parse_args()
@@ -151,7 +190,7 @@ def main():
     model = BING.load(model_path, n_jobs=min(4, os.cpu_count() or 1))  # window sizes in parallel threads
     print("model:", os.path.relpath(model_path, ROOT))
     pipe = Pipeline(model, a.rerank or a.compare, a.detect, a.windows, a.min_score)
-    tag = "BING" + (" + re-ranking" if a.rerank else "") + (" + detector" if a.detect else "")
+    tag = "BING" + (" + re-ranking" if a.rerank else "") + (f" + {pipe.kind.upper()} detector" if a.detect else "")
 
     if a.webcam:
         cap = open_camera(a.camera)
@@ -193,7 +232,7 @@ def main():
             cv2.putText(v, t_, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1, cv2.LINE_AA)
         saved.append((f"{stem}_compare.jpg", np.hstack([left, right])))
     elif dets is not None:
-        for name, sc, _ in dets[:8]:
+        for name, sc, _ in tidy(dets):
             print(f"  {name:12s} {sc:.2f}")
         saved.append((f"{stem}_detections.jpg", draw_detections(img, dets)))
     else:

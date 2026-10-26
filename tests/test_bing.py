@@ -79,3 +79,15 @@ def test_voc_ap():
     assert np.isclose(average_precision(dets, gts), 1.0)
     dets = np.array([[0, 0.9, 20, 20, 30, 30], [0, 0.8, 0, 0, 10, 10]], float)  # a miss ranks first
     assert np.isclose(average_precision(dets, gts), 0.5)
+
+
+def test_cnn_box_mean_matches_slicing():
+    try:
+        from bing.cnn import _box_mean, _integral
+    except ImportError:  # torch not installed
+        return
+    fm = rng.random((3, 9, 11)).astype(np.float32)
+    b = np.array([[0, 0, 160, 96], [33, 17, 70, 40]], np.float32)  # pixels, stride 16
+    got = _box_mean(_integral(fm), b, 16)
+    want = [fm[:, 0:6, 0:10].mean((1, 2)), fm[:, 1:3, 2:5].mean((1, 2))]
+    assert np.allclose(got, want, atol=1e-5)

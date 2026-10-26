@@ -6,3 +6,5 @@ scikit-image>=0.22                    # textures for the synthetic dataset
 matplotlib>=3.7
 numba>=0.59                           # optional: JIT fast path (falls back to numpy)
 pytest
+# optional, only for the CNN-feature detector (scripts/run_cnn_detection.py, demo --detect cnn):
+# torch, torchvision

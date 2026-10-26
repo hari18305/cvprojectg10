@@ -462,18 +462,42 @@ def detection_figs():
             "Sliding windows": SERIES[4]}
     labels = {"BING + multi-cue re-ranking": "BING + re-ranking (ours)"}
     fig, axs = plt.subplots(1, 2, figsize=(12, 4.3), gridspec_kw={"width_ratios": [1.25, 1]})
-    x = np.arange(len(budgets))
-    w = 0.8 / len(sources)
-    for k, s in enumerate(sources):
-        v = [R[f"{s} @{n}"]["mAP"] for n in budgets]
-        xs = x + (k - (len(sources) - 1) / 2) * w
-        axs[0].bar(xs, [100 * vi for vi in v], w, color=cols.get(s, INK2), label=labels.get(s, s))
-        for xi, vi in zip(xs, v):
-            axs[0].text(xi, 100 * vi + 0.15, f"{100 * vi:.1f}", ha="center", fontsize=9.5)
-    axs[0].set_xticks(x); axs[0].set_xticklabels([f"top {n} windows" for n in budgets])
-    axs[0].set_ylabel("mAP (%)"); axs[0].grid(axis="x", visible=False)
-    axs[0].set_title("Detector mAP on VOC 2007 test", loc="left"); axs[0].legend(loc="upper left", fontsize=10.5)
-    axs[0].set_ylim(0, 100 * max(r["mAP"] for r in R.values()) * 1.45)
+    cpath = os.path.join(ROOT, "results", "cnn_detection_voc.json")
+    if os.path.exists(cpath):  # CNN features + box regression, one line per source
+        C = json.load(open(cpath))["results"]
+        cb = sorted({r["windows"] for r in C.values()})
+        ends = {}
+        for s in sources:
+            v = [100 * C[f"{s} @{n} +box regression"]["mAP"] for n in cb]
+            axs[0].plot(cb, v, "o-", color=cols.get(s, INK2), lw=2.2, ms=6, label=labels.get(s, s))
+            ends[s] = v
+        for side, idx, x, ha in (("l", 0, cb[0] * 0.9, "right"), ("r", -1, cb[-1] * 1.1, "left")):
+            placed = []
+            for s in sorted(sources, key=lambda s: -ends[s][idx]):
+                y = ends[s][idx]
+                while any(abs(y - p) < 1.1 for p in placed):
+                    y -= 0.4
+                placed.append(y)
+                axs[0].text(x, y, f"{ends[s][idx]:.1f}", ha=ha, va="center", fontsize=10, color=cols.get(s, INK2))
+        hog = 100 * max(R[f"{s} @{n}"]["mAP"] for s in sources for n in budgets)
+        axs[0].axhline(hog, color=INK2, lw=1, ls=":")
+        axs[0].text(cb[-1] * 1.05, hog + 0.4, f"same detector with HOG features: at most {hog:.1f}", ha="right", fontsize=10, color=INK2)
+        axs[0].set_xscale("log"); axs[0].set_xticks(cb); axs[0].set_xticklabels([str(n) for n in cb])
+        axs[0].set_xlim(cb[0] * 0.6, cb[-1] * 1.7)
+        axs[0].set_xlabel("windows per image given to the detector"); axs[0].set_ylabel("mAP (%)")
+        axs[0].set_ylim(0, max(100 * r["mAP"] for r in C.values()) * 1.25)
+        axs[0].set_title("Detector mAP, CNN features + box regression", loc="left")
+        axs[0].legend(loc="upper right", fontsize=10, ncol=2)
+    else:
+        x = np.arange(len(budgets))
+        w = 0.8 / len(sources)
+        for k, s in enumerate(sources):
+            v = [R[f"{s} @{n}"]["mAP"] for n in budgets]
+            xs = x + (k - (len(sources) - 1) / 2) * w
+            axs[0].bar(xs, [100 * vi for vi in v], w, color=cols.get(s, INK2), label=labels.get(s, s))
+        axs[0].set_xticks(x); axs[0].set_xticklabels([f"top {n} windows" for n in budgets])
+        axs[0].set_ylabel("mAP (%)"); axs[0].set_title("Detector mAP on VOC 2007 test", loc="left")
+        axs[0].legend(loc="upper left", fontsize=10.5)
 
     V = json.load(open(os.path.join(ROOT, "results", "voc.json")))
     for name, col, lab in (("BING (ours, released-code sizes, greedy NMS)", SERIES[1], "BING"),

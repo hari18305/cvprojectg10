@@ -47,6 +47,7 @@ bing/
   rerank.py      our stage III: multi-cue re-ranking of BING's proposals (section 6.1)
   refine.py      gradient-guided box refinement (tried; did not help, section 6.1)
   detector.py    complete detector on proposals: HOG + colour features, linear SVMs, VOC AP
+  cnn.py         CNN window features (frozen ResNet-50), joint linear SVMs, box regression
   metrics.py     DR-#WIN curves, MABO, AUC, recall-vs-IoU
   datasets.py    synthetic scene generator, real-photo set, PASCAL VOC 2007 loader
 scripts/
@@ -63,6 +64,7 @@ scripts/
   run_novelty.py      our extensions vs plain BING on the VOC 2007 test set
   run_rerank_ablation.py  which cues the re-ranker relies on
   run_detection.py    detector built on proposals, VOC 2007 mAP per window source
+  run_cnn_detection.py  the same with CNN features and box regression
 baselines/original_bing/  build + run the authors' C++ BING (CLI entry point, OpenCV 4 patch)
 presentation/         slide deck (.pptx + .pdf) and the speaker script
 models/               trained models: synthetic (RGB / HSV / Gray) and PASCAL VOC 2007
@@ -90,7 +92,7 @@ python scripts/demo.py --image photo.jpg --top 50 --model voc   # 50 boxes, mode
 ```bash
 python scripts/demo.py --image photo.jpg --compare     # BING vs + re-ranking, side by side
 python scripts/demo.py --image photo.jpg --rerank      # top boxes after our re-ranking
-python scripts/demo.py --image photo.jpg --detect      # our HOG + SVM detector (weak: VOC mAP ~7 %)
+python scripts/demo.py --image photo.jpg --detect      # our detector: CNN features if torch is installed, else HOG
 python scripts/demo.py --webcam --camera 1 --rerank    # live, with re-ranking
 ```
 
@@ -146,7 +148,8 @@ Our extensions on VOC 2007 (section 6):
 python scripts/train_rerank.py --voc-root /data/voc/VOCdevkit/VOC2007          # stage III re-ranker
 python scripts/run_novelty.py --voc-root /data/voc/VOCdevkit/VOC2007           # re-ranking vs plain BING
 python scripts/run_rerank_ablation.py --voc-root /data/voc/VOCdevkit/VOC2007   # which cues matter
-python scripts/run_detection.py --voc-root /data/voc/VOCdevkit/VOC2007         # detector (~2 h on 4 cores)
+python scripts/run_detection.py --voc-root /data/voc/VOCdevkit/VOC2007         # HOG detector (~2 h on 4 cores)
+python scripts/run_cnn_detection.py --voc-root /data/voc/VOCdevkit/VOC2007     # CNN-feature detector (~2 h; needs torch)
 python scripts/measure_speed.py --voc-root /data/voc/VOCdevkit/VOC2007 --threads-only
 ```
 
@@ -290,7 +293,7 @@ All figures are in `results/figures/`:
 * `top8_*.png`, `found_*.png`, `heatmaps_real.png`: qualitative results
 * `speed.png`, `stage_time.png`, `ablations.png`, `speed_threads.png`
 * `novelty_voc.png`, `novelty_example.png`: our multi-cue re-ranking (section 6.1)
-* `detection_voc.png`: the detector built on the proposals (section 6.2)
+* `detection_voc.png`: the detector built on the proposals (CNN features), and why localisation matters (section 6.2)
 
 ## 6. Our extensions beyond the paper
 
@@ -347,6 +350,25 @@ VOC 2007 test, mean AP over the 20 classes, same classifier for every source of 
 * HOG with a linear SVM is a weak classifier, so all numbers are low (for comparison, DPM reaches about 34 % and R-CNN about 58 % on this test set).
 * With more windows, random boxes overtake BING (8.4 % at 1000). The reason is localisation: BING's top 1000 cover 30 % of objects at IoU ≥ 0.7, random boxes 43 % (`results/figures/detection_voc.png`). A detector needs tight boxes, which agrees with Hosang et al. (TPAMI 2016): recall at stricter overlaps predicts detection quality. BING's coarse boxes, not its recall at IoU 0.5, limit it here.
 
+#### With CNN features
+
+HOG limits the detector above, so we also trained it on features from a ResNet-50 pre-trained on ImageNet (`bing/cnn.py`, `scripts/run_cnn_detection.py`). The network is frozen (no fine-tuning) and runs once per image, with the longer side scaled to 600 px. Each window is described by the mean conv4 and conv5 activations inside it (3,072 values, square-rooted and L2-normalised), read from integral images of the feature maps, so 1,000 windows cost about 75 ms. The 20 linear SVMs are trained jointly with L-BFGS on ground-truth boxes plus windows with IoU ≥ 0.7, against background windows, with one round of hard-negative mining. Class-specific box regression (as in R-CNN, ridge regression on windows with IoU ≥ 0.6) then moves each box. Only the detector uses a deep network; the proposals still come from BING.
+
+| Windows | top 100 | top 100 + box regression | top 300 + box regression | top 1000 + box regression |
+|---|---|---|---|---|
+| BING | 16.9 % | 18.8 % | 17.6 % | 13.9 % |
+| **BING + multi-cue re-ranking (ours)** | 16.7 % | 19.1 % | 17.6 % | 13.1 % |
+| Random boxes | 11.4 % | 13.8 % | 15.0 % | 16.0 % |
+| Sliding windows | 0.5 % | 0.6 % | 2.1 % | 2.7 % |
+
+* CNN features raise the best result from 7.4 % (HOG) to **19.1 %** mAP, with our re-ranked top 100 windows.
+* At 100 windows, BING's boxes clearly beat random boxes (18.8 % vs 13.8 %) and sliding windows (0.6 %).
+* Box regression adds about 2 points for every source.
+* With more windows, random boxes still overtake BING (16.0 % at 1000): BING's loose boxes remain the limit, as with HOG.
+* Without fine-tuning, the numbers stay well below R-CNN (about 58 %). Per test image: ResNet-50 pass 353 ms, BING 19 ms, re-ranking 16 ms (4 CPU threads).
+
+The demo uses this detector when torch is installed: `python scripts/demo.py --image photo.jpg --detect`.
+
 ### 6.3 Multi-threading
 
 The released C++ code is fast because it uses all cores. Our first version did not scale (58 img/s on 1 thread, 57 on 4). We added two modes (`bing/model.py`, `bing/fast.py`):
@@ -367,7 +389,7 @@ The fused kernel orders tied scores differently from the single-threaded path, s
 ## 7. Limitations and future work
 
 * Localisation is coarse (power-of-two sizes, 8-pixel stride). Our edge-snapping refinement and finer window sizes did not fix it (section 6.1); learned box regression is the next thing to try, and section 6.2 shows it is what detection needs.
-* The detector uses HOG and linear SVMs; stronger features (or a CNN classifier, as in R-CNN) would raise mAP a lot.
+* The detector's CNN is frozen; fine-tuning it on VOC (as R-CNN does) would raise mAP a lot.
 * The re-ranker halves the speed (34 vs 67 img/s); a smaller tree model or fewer cues would recover some of it.
 * Training on real annotated images would close the gap between synthetic and real data.
 

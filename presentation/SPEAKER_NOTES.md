@@ -8,8 +8,8 @@ The same text is in the notes of each slide in `BING_Objectness_Group10.pptx`.
 | Ayyappadas M T | 4, 5, 6 | ~2:20 |
 | Hari Sankar A | 7, 8 | ~1:25 |
 | Parthiv M | 9, 10, 11, 12 | ~3:00 |
-| Sai Kishen K M | 13, 14, 15 | ~2:35 |
-| **Total** | 1–15 | **~11:05** |
+| Sai Kishen K M | 13, 14, 15 | ~2:45 |
+| **Total** | 1–15 | **~11:15** |
 
 ## Slide 1 — Abhinav Dileep (~35 s, 0:00–0:35)
 
@@ -67,14 +67,14 @@ Next, the results of our novelty on the full VOC 2007 test set. With re-ranking,
 
 **→ Hand over to Sai Kishen K M.**
 
-## Slide 13 — Sai Kishen K M (~70 s, 8:30–9:40)
+## Slide 13 — Sai Kishen K M (~80 s, 8:30–9:50)
 
-Thank you, Parthiv. Proposals exist to feed a detector, so we built one. Each window is resized to 64 by 64 pixels and described with HOG and a colour histogram, both handcrafted, and one linear SVM per VOC class scores it. We trained on VOC trainval with one round of hard-negative mining. The best result is 7.4 percent mean average precision, with our re-ranked top 100 windows; plain BING gives 6.8 percent, and 100 sliding windows give only 0.5 percent. So proposals matter: at the same budget they are about fifteen times better than sliding windows. But we have to be honest about two things. HOG is a weak classifier, so the absolute numbers are low. And with more windows, random boxes do better than BING, 8.4 percent at 1000. The plot on the right explains why: at an overlap of 0.7, BING's top 1000 cover only 30 percent of objects, against 43 percent for random boxes. A detector needs tight boxes, which matches what Hosang and colleagues found in their 2016 study of proposals.
+Thank you, Parthiv. Proposals exist to feed a detector, so we built one, in two versions. Both use one linear classifier per VOC class, trained on VOC trainval with hard-negative mining. The first describes each window with HOG and a colour histogram, fully handcrafted. The second takes each window's average activations from a ResNet-50 pretrained on ImageNet, and adds box regression to tighten the boxes. With HOG the best result is 7.4 percent mean average precision. With CNN features it is 19.1 percent, again with our re-ranked top 100 windows. The chart shows the CNN version. At 100 windows, BING's boxes give 18.8 percent against 13.8 percent for random boxes and only 0.6 percent for sliding windows, so proposals matter. With 1000 windows, random boxes catch up and reach 16.0 percent. The plot on the right explains why: at an overlap of 0.7, BING's top 1000 cover only 30 percent of objects, against 43 percent for random boxes. A detector needs tight boxes, which matches what Hosang and colleagues found in their 2016 study of proposals.
 
-## Slide 14 — Sai Kishen K M (~40 s, 9:40–10:20)
+## Slide 14 — Sai Kishen K M (~40 s, 9:50–10:30)
 
 Our ablation studies show what matters. The simple minus-one, zero, one gradient mask works as well as Sobel. RGB is the best single colour space. Just two bits of gradient are enough. And because the model has only 64 weights, even 10 training images give good results. On the right is speed. With four threads, each working on its own image, our version reaches 186 images per second, close to the authors' C++ code at 196. The main limitation is that BING's boxes are coarse, because the window sizes are powers of two and the stride is 8 pixels.
 
-## Slide 15 — Sai Kishen K M (~45 s, 10:20–11:05)
+## Slide 15 — Sai Kishen K M (~45 s, 10:30–11:15)
 
-To conclude: simple gradients, a 64-weight linear model and bit operations find 94 percent of objects on PASCAL VOC, matching the authors' own code. Our novelty, multi-cue re-ranking, finds 71.0 percent of objects in the top 100 and raises small-object recall from 39.3 percent to 53.3 percent. Our detector shows that proposals beat sliding windows, and that BING's loose boxes limit detection. In future we would like to make the boxes tighter and use stronger features in the detector. Thank you. We are happy to take questions, and we can show a live webcam demo.
+To conclude: simple gradients, a 64-weight linear model and bit operations find 94 percent of objects on PASCAL VOC, matching the authors' own code. Our novelty, multi-cue re-ranking, finds 71.0 percent of objects in the top 100 and raises small-object recall from 39.3 percent to 53.3 percent. Our detector reaches 19.1 percent mean average precision with CNN features, beats sliding windows by a wide margin, and shows that BING's loose boxes are what limits detection. In future we would like to make the boxes tighter and fine-tune the CNN features. Thank you. We are happy to take questions, and we can show a live webcam demo.
