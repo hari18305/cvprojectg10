@@ -85,6 +85,17 @@ python scripts/demo.py --image data/real/coffee.jpg
 python scripts/demo.py --image photo.jpg --top 50 --model voc   # 50 boxes, model trained on VOC 2007
 ```
 
+**Our extensions in the demo** (these use the VOC model automatically):
+
+```bash
+python scripts/demo.py --image photo.jpg --compare     # BING vs + re-ranking, side by side
+python scripts/demo.py --image photo.jpg --rerank      # top boxes after our re-ranking
+python scripts/demo.py --image photo.jpg --detect      # our HOG + SVM detector (weak: VOC mAP ~7 %)
+python scripts/demo.py --webcam --camera 1 --rerank    # live, with re-ranking
+```
+
+Add `--show` to open the saved pictures in a window.
+
 `--model synthetic` (default) ranks distinct objects first, so its top boxes make the clearest picture. `--model voc` finds more objects within 1000 proposals but ranks large, near full-image boxes first.
 
 **Live webcam demo.** Opens a window with the top boxes and the frame rate; press `q` to quit.
