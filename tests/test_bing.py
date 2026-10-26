@@ -54,3 +54,28 @@ def test_pack64_roundtrip():
 
 def test_iou():
     assert np.isclose(iou_matrix([[0, 0, 10, 10]], [[5, 0, 15, 10]])[0, 0], 1 / 3)
+
+
+def test_serial_kernels_match_parallel():
+    if not HAVE_NUMBA:
+        return
+    from bing.fast import binary_scores_fast, greedy_nms, normed_gradient_fast, size_pipeline
+    img = rng.integers(0, 256, (60, 70, 3)).astype(np.uint8)
+    sc = BinaryScorer(rng.normal(size=64), 2, 4)
+    g = normed_gradient_fast(img)
+    sm = binary_scores_fast(g, sc)
+    assert np.array_equal(sm, binary_scores_fast(g, sc, serial=True))
+    ys, xs, s = size_pipeline(img, sc, 2, 30)
+    ys2, xs2, s2 = greedy_nms(sm, 2, 30)
+    assert np.allclose(np.sort(s), np.sort(s2))  # same scores kept (ties may be ordered differently)
+
+
+def test_voc_ap():
+    from bing.detector import average_precision
+    gts = {0: (np.array([[0, 0, 10, 10]], float), np.array([False])),
+           1: (np.array([[0, 0, 10, 10]], float), np.array([True]))}
+    # a correct detection, a duplicate, and one on a 'difficult' object (ignored)
+    dets = np.array([[0, 0.9, 0, 0, 10, 10], [0, 0.8, 0, 0, 10, 10], [1, 0.7, 0, 0, 10, 10]], float)
+    assert np.isclose(average_precision(dets, gts), 1.0)
+    dets = np.array([[0, 0.9, 20, 20, 30, 30], [0, 0.8, 0, 0, 10, 10]], float)  # a miss ranks first
+    assert np.isclose(average_precision(dets, gts), 0.5)

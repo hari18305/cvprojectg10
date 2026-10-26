@@ -95,7 +95,7 @@ def main():
     model_path = MODELS.get(a.model, a.model)
     if not os.path.exists(model_path):
         ap.error(f"model not found: {a.model} (use synthetic, voc, or a .pkl path)")
-    model = BING.load(model_path)
+    model = BING.load(model_path, n_jobs=min(4, os.cpu_count() or 1))  # window sizes in parallel threads
     print("model:", os.path.relpath(model_path, ROOT))
 
     if a.webcam:

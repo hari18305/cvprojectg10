@@ -348,6 +348,146 @@ def voc_figs():
     fig.tight_layout(); save(fig, "voc_per_class.png")
 
 
+@plt.rc_context({"font.size": 13, "axes.titlesize": 14})
+def novelty_figs():
+    """Our stage III (multi-cue re-ranking) against plain BING on VOC 2007."""
+    path = os.path.join(ROOT, "results", "novelty_voc.json")
+    if not os.path.exists(path):
+        return
+    R = json.load(open(path))
+    base, ours = R["BING (final baseline)"], R["BING + multi-cue re-ranking (ours)"]
+    fig, axs = plt.subplots(1, 3, figsize=(12, 3.9), gridspec_kw={"width_ratios": [1.15, 0.95, 1.1]})
+    for r, col, lab in ((base, SERIES[1], "BING"), (ours, SERIES[0], "+ re-ranking (ours)")):
+        axs[0].plot(r["curve_n"], r["dr_curve"], color=col, lw=2, label=lab)
+    axs[0].set_xscale("log"); axs[0].set_ylim(0, 1.02); axs[0].set_xlabel("Number of proposals")
+    axs[0].set_ylabel("Detection rate (IoU ≥ 0.5)"); axs[0].set_title("Recall vs #proposals (VOC 2007)", loc="left")
+    axs[0].legend(loc="lower right", fontsize=9)
+
+    groups = [g for g in ("small (<32 px)", "medium (32-96 px)", "large (>96 px)") if g in base["by_size"]]
+    x = np.arange(len(groups))
+    for k, (r, col, lab) in enumerate(((base, SERIES[1], "BING"), (ours, SERIES[0], "+ re-ranking"))):
+        v = [r["by_size"][g]["dr@1000"] for g in groups]
+        axs[1].bar(x + (k - 0.5) * 0.38, v, 0.38, color=col, label=lab)
+        for xi, vi in zip(x, v):
+            axs[1].text(xi + (k - 0.5) * 0.38, vi + 0.015, f"{100 * vi:.0f}", ha="center", fontsize=9)
+    axs[1].set_xticks(x); axs[1].set_xticklabels([g.split(" (")[0] + "\n" + g.split(" (")[1].rstrip(")") for g in groups], fontsize=11)
+    axs[1].set_ylim(0, 1.3); axs[1].set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    axs[1].set_ylabel("DR@1000"); axs[1].grid(axis="x", visible=False)
+    axs[1].set_title("DR@1000 by object size", loc="left"); axs[1].legend(loc="upper left", fontsize=10, ncol=2)
+
+    abl = [("all cues", ours)] + [(k.replace("re-ranking without ", "− "), v) for k, v in R.items()
+                                  if k.startswith("re-ranking without")]
+    abl.append(("BING alone", base))
+    names = [a for a, _ in abl]
+    vals = [r["dr_at"]["100"] if "100" in r["dr_at"] else r["dr_at"][100] for _, r in abl]
+    cols = [SERIES[0]] + [SERIES[4]] * (len(abl) - 2) + [SERIES[1]]
+    y = np.arange(len(abl))[::-1]
+    axs[2].barh(y, vals, color=cols)
+    for yi, v in zip(y, vals):
+        axs[2].text(v + 0.003, yi, f"{100 * v:.1f}%", va="center", fontsize=9)
+    axs[2].set_yticks(y); axs[2].set_yticklabels(names); axs[2].set_xlim(min(vals) - 0.04, max(vals) + 0.03)
+    axs[2].set_xlabel("DR@100"); axs[2].grid(axis="y", visible=False)
+    axs[2].set_title("Which cues matter?", loc="left")
+    fig.tight_layout(); save(fig, "novelty_voc.png")
+
+
+@plt.rc_context({"font.size": 13, "axes.titlesize": 14})
+def threads_fig():
+    """Proposal speed on VOC images: ours (1 thread, window sizes in parallel, images in
+    parallel) against the authors' C++ code."""
+    V = json.load(open(os.path.join(ROOT, "results", "voc.json")))
+    T, A = V.get("speed_threads"), V.get("BING (authors' C++)", {})
+    if not T:
+        return
+    rows = [("authors' C++, 1 thread", 1 / A["sec_per_img_reported"], SERIES[1]),
+            ("ours, 1 thread", V.get("speed_ours", {}).get("1 thread", T["window sizes in parallel"]["1"]), SERIES[0]),
+            ("ours, 4 threads:\nwindow sizes in parallel", T["window sizes in parallel"]["4"], SERIES[0]),
+            ("ours, 4 threads:\nimages in parallel", T["images in parallel"]["4"], SERIES[0])]
+    if "sec_per_img_reported_4_threads" in A:
+        rows.append(("authors' C++, 4 threads", 1 / A["sec_per_img_reported_4_threads"], SERIES[1]))
+    fig, ax = plt.subplots(figsize=(7.5, 4.2))
+    y = np.arange(len(rows))[::-1]
+    ax.barh(y, [r[1] for r in rows], color=[r[2] for r in rows])
+    for yi, r in zip(y, rows):
+        ax.text(r[1] + 3, yi, f"{r[1]:.0f}", va="center", fontsize=12)
+    ax.set_yticks(y); ax.set_yticklabels([r[0] for r in rows]); ax.grid(axis="y", visible=False)
+    ax.set_xlabel("images / second (VOC 2007, 4-core CPU)"); ax.set_xlim(0, max(r[1] for r in rows) * 1.15)
+    ax.set_title("Proposal speed: multi-threading", loc="left")
+    fig.tight_layout(); save(fig, "speed_threads.png")
+
+
+def novelty_example(voc_root, img_id="001183", k=20):
+    """BING's top-k windows before and after our re-ranking, on one VOC test image
+    (ground-truth objects found by the top k in green, missed ones in red)."""
+    import pickle
+    from bing.metrics import iou_matrix
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from run_voc import load_test
+    gt = {i: g for i, g, _ in load_test(voc_root)}[img_id]
+    img = cv2.imread(os.path.join(voc_root, "JPEGImages", img_id + ".jpg"))
+    m = BING.load(os.path.join(ROOT, "models", "bing_voc_rgb_released_sizes_greedy.pkl"))
+    with open(os.path.join(ROOT, "models", "rerank_voc.pkl"), "rb") as f:
+        rr = pickle.load(f)
+    b, s = m.propose(img)
+    r = rr.rerank(img, b, s)[0]
+    fig, axs = plt.subplots(1, 2, figsize=(11, 4.4))
+    for ax, boxes, t in ((axs[0], b, f"BING: top {k}"), (axs[1], r, f"+ re-ranking (ours): top {k}")):
+        over = img.copy()
+        for bx in boxes[:k].astype(int):
+            cv2.rectangle(over, tuple(bx[:2]), tuple(bx[2:]), (40, 220, 250), 2)
+        v = cv2.addWeighted(over, 0.6, img, 0.4, 0)
+        found = iou_matrix(gt, boxes[:k]).max(1) >= 0.5
+        for g, f_ in zip(gt.astype(int), found):
+            cv2.rectangle(v, tuple(g[:2]), tuple(g[2:]), (0, 200, 0) if f_ else (40, 40, 230), 3)
+        ax.imshow(v[..., ::-1]); ax.set_title(f"{t}: {found.sum()} of {len(gt)} objects found", loc="left")
+    for ax in axs:
+        ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+    fig.tight_layout(); save(fig, "novelty_example.png")
+
+
+@plt.rc_context({"font.size": 13, "axes.titlesize": 14})
+def detection_figs():
+    """Detector built on proposals: VOC 2007 mAP for each source of windows, and why
+    localisation matters (recall at stricter overlaps)."""
+    path = os.path.join(ROOT, "results", "detection_voc.json")
+    if not os.path.exists(path):
+        return
+    R = json.load(open(path))["results"]
+    sources = []
+    for r in R.values():
+        if r["source"] not in sources:
+            sources.append(r["source"])
+    budgets = sorted({r["windows"] for r in R.values()})
+    cols = {"BING": SERIES[1], "BING + multi-cue re-ranking": SERIES[0], "Random boxes": SERIES[6],
+            "Sliding windows": SERIES[4]}
+    labels = {"BING + multi-cue re-ranking": "BING + re-ranking (ours)"}
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.3), gridspec_kw={"width_ratios": [1.25, 1]})
+    x = np.arange(len(budgets))
+    w = 0.8 / len(sources)
+    for k, s in enumerate(sources):
+        v = [R[f"{s} @{n}"]["mAP"] for n in budgets]
+        xs = x + (k - (len(sources) - 1) / 2) * w
+        axs[0].bar(xs, [100 * vi for vi in v], w, color=cols.get(s, INK2), label=labels.get(s, s))
+        for xi, vi in zip(xs, v):
+            axs[0].text(xi, 100 * vi + 0.15, f"{100 * vi:.1f}", ha="center", fontsize=9.5)
+    axs[0].set_xticks(x); axs[0].set_xticklabels([f"top {n} windows" for n in budgets])
+    axs[0].set_ylabel("mAP (%)"); axs[0].grid(axis="x", visible=False)
+    axs[0].set_title("Detector mAP on VOC 2007 test", loc="left"); axs[0].legend(loc="upper left", fontsize=10.5)
+    axs[0].set_ylim(0, 100 * max(r["mAP"] for r in R.values()) * 1.45)
+
+    V = json.load(open(os.path.join(ROOT, "results", "voc.json")))
+    for name, col, lab in (("BING (ours, released-code sizes, greedy NMS)", SERIES[1], "BING"),
+                           ("Random boxes", SERIES[6], "Random boxes")):
+        ri = V[name]["recall_iou"]
+        t = sorted(ri, key=float)
+        axs[1].plot([float(k) for k in t], [ri[k] for k in t], "o-", color=col, lw=2, ms=4, label=lab)
+    axs[1].axvline(0.7, color=INK2, lw=1, ls=":")
+    axs[1].set_xlabel("IoU threshold"); axs[1].set_ylabel("Recall @1000")
+    axs[1].set_ylim(0, 1.02); axs[1].legend(loc="upper right", fontsize=10.5)
+    axs[1].set_title("Why: BING's boxes are loose", loc="left")
+    fig.tight_layout(); save(fig, "detection_voc.png")
+
+
 def main(tag="synthetic"):
     R = json.load(open(os.path.join(ROOT, "results", f"results_{tag}.json")))
     curves(R, "test", "dr_curve", "Detection rate (IoU ≥ 0.5)", "dr_synthetic.png", "Recall vs #proposals — synthetic test set")
@@ -362,6 +502,9 @@ def main(tag="synthetic"):
     calib_fig(R)
     tier1_figs()
     voc_figs()
+    novelty_figs()
+    detection_figs()
+    threads_fig()
     model = BING.load(os.path.join(ROOT, "models", f"bing_{tag}_rgb.pkl"))
     real = list(get_dataset("real", "test"))
     syn = list(get_dataset("synthetic", "test", 12))

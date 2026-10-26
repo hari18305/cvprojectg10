@@ -6,6 +6,8 @@ pushed into per-row bytes with a single shift/OR, row bytes are stacked into a
 BITWISE AND + POPCOUNT only.  Falls back to the numpy implementation when
 Numba is not installed.
 """
+import types
+
 import numpy as np
 
 try:
@@ -22,7 +24,7 @@ if HAVE_NUMBA:
         x = (x + (x >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
         return (x * np.uint64(0x0101010101010101)) >> np.uint64(56)
 
-    @njit(cache=True)
+    @njit(cache=True, nogil=True)
     def _ng(img):
         """Normed gradient ([-1,0,1] mask, max over channels) of H x W x C uint8."""
         H, W, C = img.shape
@@ -48,8 +50,7 @@ if HAVE_NUMBA:
                 g[y, x] = 255 if v > 255 else v
         return g
 
-    @njit(cache=True, parallel=True)
-    def _binary_scores(g, a_plus, betas, n_bits):
+    def _scores_py(g, a_plus, betas, n_bits):
         H, W = g.shape
         oh, ow = H - 7, W - 7
         nw = a_plus.shape[0]
@@ -81,9 +82,21 @@ if HAVE_NUMBA:
                 out[y, x] = s
         return out
 
+    def _renamed(f, name):
+        """Copy of a Python function under another name, so Numba caches it separately."""
+        code = f.__code__.replace(co_name=name)
+        if hasattr(code, "co_qualname"):
+            code = code.replace(co_qualname=name)
+        return types.FunctionType(code, f.__globals__, name)
+
+    # parallel over rows: for scoring one large map at a time
+    _binary_scores = njit(cache=True, parallel=True)(_renamed(_scores_py, "_binary_scores"))
+    # serial and GIL-free: for scoring many window sizes at once from a thread pool
+    _binary_scores_serial = njit(cache=True, nogil=True)(_renamed(_scores_py, "_binary_scores_serial"))
+
 
 if HAVE_NUMBA:
-    @njit(cache=True)
+    @njit(cache=True, nogil=True)
     def _greedy_nms(sm, order, radius, k):
         """The authors' non-maximum suppression: visit windows from the highest score
         down, accept a window unless an accepted one lies within `radius` map cells,
@@ -105,6 +118,37 @@ if HAVE_NUMBA:
                 for xx in range(max(0, x - radius), min(W, x + radius + 1)):
                     blocked[yy, xx] = True
         return ys[:n], xs[:n]
+
+
+if HAVE_NUMBA:
+    @njit(cache=True, nogil=True)
+    def _size_pipeline(img, a_plus, betas, n_bits, radius, k):
+        """Normed gradient, bitwise scores and greedy NMS for one resized image, in one
+        GIL-free call (used when several window sizes are processed in parallel)."""
+        g = _ng(img)
+        sm = _binary_scores_serial(g, a_plus, betas, n_bits)
+        flat = sm.ravel()
+        m = k * (2 * radius + 1) ** 2
+        if flat.size > 2 * m:
+            thr = np.partition(flat, flat.size - m)[flat.size - m]  # m-th best score
+            cand = np.nonzero(flat >= thr)[0]
+            order = cand[np.argsort(-flat[cand], kind="mergesort")]
+            ys, xs = _greedy_nms(sm, order, radius, k)
+            if len(ys) < k and len(ys) > 0:
+                ys, xs = _greedy_nms(sm, np.argsort(-flat, kind="mergesort"), radius, k)
+        else:
+            ys, xs = _greedy_nms(sm, np.argsort(-flat, kind="mergesort"), radius, k)
+        sc = np.empty(len(ys), np.float32)
+        for i in range(len(ys)):
+            sc[i] = sm[ys[i], xs[i]]
+        return ys, xs, sc
+
+
+def size_pipeline(img, scorer, radius, k):
+    if img.ndim == 2:
+        img = img[:, :, None]
+    return _size_pipeline(np.ascontiguousarray(img), scorer.a_plus,
+                          scorer.betas.astype(np.float64), scorer.n_bits, radius, k)
 
 
 def greedy_nms(sm, radius, k):
@@ -143,5 +187,6 @@ def normed_gradient_fast(img):
     return _ng(np.ascontiguousarray(img))
 
 
-def binary_scores_fast(g, scorer):
-    return _binary_scores(g, scorer.a_plus, scorer.betas.astype(np.float64), scorer.n_bits)
+def binary_scores_fast(g, scorer, serial=False):
+    f = _binary_scores_serial if serial else _binary_scores
+    return f(g, scorer.a_plus, scorer.betas.astype(np.float64), scorer.n_bits)

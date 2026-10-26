@@ -22,6 +22,7 @@ It answers *"Which regions of this image are likely to contain objects?"*: given
 ```
 Input image → Pre-processing → Candidate windows (36 sizes) → Gradient features
 → Binarized normed gradients → Objectness score → Ranking (NMS + calibration) → Top proposals
+→ (our extension) multi-cue re-ranking → (our extension) HOG + SVM detector
 ```
 
 | Stage | Implementation |
@@ -41,7 +42,11 @@ bing/
   features.py    NG maps, colour spaces, [-1 0 1] vs Sobel, per-box training features
   binary.py      Alg. 1 filter binarization, 64-bit packing, AND+POPCOUNT scorer (numpy)
   fast.py        Numba JIT kernels: NG map + Alg. 2 bitwise scoring (parallel)
-  model.py       BING class: two-stage training, NMS, ranking, heat-map, save/load
+  model.py       BING class: two-stage training, NMS, ranking, heat-map, save/load,
+                 window sizes scored in parallel threads (n_jobs)
+  rerank.py      our stage III: multi-cue re-ranking of BING's proposals (section 6.1)
+  refine.py      gradient-guided box refinement (tried; did not help, section 6.1)
+  detector.py    complete detector on proposals: HOG + colour features, linear SVMs, VOC AP
   metrics.py     DR-#WIN curves, MABO, AUC, recall-vs-IoU
   datasets.py    synthetic scene generator, real-photo set, PASCAL VOC 2007 loader
 scripts/
@@ -54,8 +59,12 @@ scripts/
   prepare_voc.py      download PASCAL VOC 2007 and prepare it for both implementations
   run_voc.py          VOC 2007 evaluation: ours, authors' code, Selective Search, per-class recall
   measure_speed.py    controlled speed benchmark (1 and 4 threads)
+  train_rerank.py     train the stage III re-ranker on VOC 2007 trainval
+  run_novelty.py      our extensions vs plain BING on the VOC 2007 test set
+  run_rerank_ablation.py  which cues the re-ranker relies on
+  run_detection.py    detector built on proposals, VOC 2007 mAP per window source
 baselines/original_bing/  build + run the authors' C++ BING (CLI entry point, OpenCV 4 patch)
-presentation/         slide deck (.pptx + .pdf) and its generator (build_deck.js)
+presentation/         slide deck (.pptx + .pdf) and the speaker script
 models/               trained models: synthetic (RGB / HSV / Gray) and PASCAL VOC 2007
 data/real/            10 real photos with 58 hand-labelled boxes
 tests/                unit tests (bitwise score == float score, numba == numpy, IoU …)
@@ -107,7 +116,6 @@ python -m pip install --force-reinstall --no-cache-dir "opencv-contrib-python>=4
 python scripts/make_synthetic.py                    # 600 train / 300 test scenes
 python scripts/run_experiments.py                   # train + evaluate + ablations
 python scripts/make_figures.py                      # figures
-node presentation/build_deck.js                     # rebuild the slides (needs `npm i pptxgenjs`)
 python -m pytest tests -q
 ```
 
@@ -119,6 +127,16 @@ bash baselines/original_bing/run_original.sh /data/voc/VOC2007_original_bing/ 1 
 python scripts/run_voc.py --voc-root /data/voc/VOCdevkit/VOC2007 --orig /data/voc/VOC2007_original_bing
 python scripts/run_voc.py --voc-root /data/voc/VOCdevkit/VOC2007 --sizes released --nms greedy --only-ours
 python scripts/measure_speed.py --voc-root /data/voc/VOCdevkit/VOC2007
+```
+
+Our extensions on VOC 2007 (section 6):
+
+```bash
+python scripts/train_rerank.py --voc-root /data/voc/VOCdevkit/VOC2007          # stage III re-ranker
+python scripts/run_novelty.py --voc-root /data/voc/VOCdevkit/VOC2007           # re-ranking vs plain BING
+python scripts/run_rerank_ablation.py --voc-root /data/voc/VOCdevkit/VOC2007   # which cues matter
+python scripts/run_detection.py --voc-root /data/voc/VOCdevkit/VOC2007         # detector (~2 h on 4 cores)
+python scripts/measure_speed.py --voc-root /data/voc/VOCdevkit/VOC2007 --threads-only
 ```
 
 To run the **authors' C++ code** on the same images and compare (needs `cmake`, a C++ compiler and `libopencv-dev`):
@@ -168,7 +186,7 @@ Train on the 5,011 trainval images, test on the 4,952 test images (12,032 object
 
 \*Our BING on the same 300 images: DR@1000 94.3 %.
 
-The authors' code scores 96.0 % DR@1000 with its own evaluator (which uses VOC's inclusive-pixel box areas), so the paper's result reproduces; our evaluator gives it 93.8 %. Our implementation matches it. Our speed is 58 img/s on 1 thread and does not scale to 4 threads (57 img/s), because Python overhead per window size dominates; the C++ code parallelises across images.
+The authors' code scores 96.0 % DR@1000 with its own evaluator (which uses VOC's inclusive-pixel box areas), so the paper's result reproduces; our evaluator gives it 93.8 %. Our implementation matches it. Our speed is 58 img/s on 1 thread. Section 6.3 adds multi-threading: 186 img/s on 4 threads, against 196 for the C++ code.
 
 **Two details the paper leaves out.** Our first version followed the paper's text and plateaued at 76 %:
 
@@ -259,14 +277,88 @@ All figures are in `results/figures/`:
 * `tier1_vs_original.png`, `tier1_breakdown.png`: authors' code vs ours, recall by size and shape
 * `filter_w.png`, `filter_bases.png`, `ng_pipeline.png`, `calibration.png`: model internals
 * `top8_*.png`, `found_*.png`, `heatmaps_real.png`: qualitative results
-* `speed.png`, `stage_time.png`, `ablations.png`
+* `speed.png`, `stage_time.png`, `ablations.png`, `speed_threads.png`
+* `novelty_voc.png`, `novelty_example.png`: our multi-cue re-ranking (section 6.1)
+* `detection_voc.png`: the detector built on the proposals (section 6.2)
 
-## 6. Limitations and future work
+## 6. Our extensions beyond the paper
 
-* Localisation is coarse. Refining the top boxes or adding intermediate window sizes would raise MABO.
-* Our Python pipeline does not scale across threads; a C++/Cython kernel over whole images, or parallelism across images, would be needed to approach the C++ code's multi-threaded speed.
+### 6.1 Novelty: multi-cue re-ranking (stage III)
+
+BING ranks windows with a single cue, its 8×8 edge template. We add a third stage (`bing/rerank.py`) that re-scores BING's proposals with cheap, handcrafted cues. Each cue is read from integral images, so it costs O(1) per window:
+
+| Cue group | Values per window |
+|---|---|
+| Colour contrast | distance between the mean Lab colour inside the window and in a ring around it (the window grown by ¼ of its size per side); lightness difference |
+| Edge density | mean gradient magnitude inside, in the ring, and their log-ratio |
+| Geometry | centre position, distance to the image centre, log area, log aspect ratio, relative width and height, ring share, touches the border |
+| BING | calibrated score and log rank |
+
+A gradient-boosted tree model (scikit-learn `HistGradientBoostingClassifier`) combines these 16 values. It is trained on the proposals of 2,500 VOC 2007 trainval images, labelled positive when IoU ≥ 0.5 with an object (`scripts/train_rerank.py`), and the proposals are re-sorted by its probability. No deep network is involved.
+
+Full VOC 2007 test set (4,952 images, 12,032 objects), `scripts/run_novelty.py` and `scripts/run_rerank_ablation.py`:
+
+| Method | DR@100 | DR@1000 | DR@5000 | MABO@1000 | small objects DR@1000 | AUC | img/s |
+|---|---|---|---|---|---|---|---|
+| BING (final) | 67.2 % | 94.0 % | 96.0 % | 0.651 | 39.3 % | 0.719 | 67 |
+| **BING + multi-cue re-ranking (ours)** | **71.0 %** | **94.7 %** | 96.0 % | **0.653** | **53.3 %** | **0.741** | 34 |
+| re-ranking without colour contrast | 69.5 % | 94.5 % | 96.0 % | 0.652 | 51.6 % | 0.732 | |
+| re-ranking without edge density | 69.4 % | 94.3 % | 96.0 % | 0.651 | 45.0 % | 0.732 | |
+| re-ranking without geometry | 70.2 % | 94.6 % | 96.0 % | 0.652 | 54.8 % | 0.736 | |
+
+Small objects are those under 32 px (516 of the 12,032). DR@5000 cannot change, because re-ranking only re-orders BING's windows.
+
+* Re-ranking raises recall at every budget (`results/figures/novelty_voc.png`). The gain is largest at small budgets, which is where a detector works.
+* Every cue group helps. Edge density matters most for small objects: without it, small-object recall falls from 53.3 % to 45.0 %.
+* The cost is speed: 34 instead of 67 img/s, still about 40 times faster than Selective Search.
+* **Tried and rejected** (kept in the repository as negative results): snapping each box side to the strongest nearby edge line (`bing/refine.py`), and adding intermediate window sizes. On a 300-image subset both looked promising, but on the full test set neither raised recall (DR@1000 93.6 % and 93.9 %).
+
+`results/figures/novelty_example.png` shows one test image: BING's top 20 windows find one of three objects, the re-ranked top 20 find all three.
+
+### 6.2 A complete detector built on the proposals
+
+Proposals exist to feed a detector, so we built one (`bing/detector.py`, `scripts/run_detection.py`), in the style of R-CNN but with handcrafted features only:
+
+* each window is padded by 1/8 per side, warped to 64×64 and described with HOG (9 bins, 8×8 cells, 1,764 values) plus an 8×4 hue/saturation histogram (1,796 values in all);
+* one linear SVM per VOC class, trained on VOC 2007 trainval: positives are the ground-truth boxes and their mirror images (25,216 patches), negatives are BING proposals overlapping no object (IoU < 0.3), then one round of hard-negative mining on 1,500 trainval images (about 14,500 per class);
+* at test time the top N windows are scored, per-class non-maximum suppression (IoU 0.3) is applied, and the VOC 2007 11-point average precision is computed ("difficult" objects ignored).
+
+VOC 2007 test, mean AP over the 20 classes, same classifier for every source of windows:
+
+| Windows | top 100 | top 500 | top 1000 |
+|---|---|---|---|
+| BING | 6.8 % | 6.0 % | 5.6 % |
+| **BING + multi-cue re-ranking (ours)** | 7.4 % | 5.9 % | 5.4 % |
+| Random boxes | 6.8 % | 8.2 % | 8.4 % |
+| Sliding windows | 0.5 % | 1.0 % | 1.1 % |
+
+* Proposals matter: at 100 windows, BING's windows give about 15 times the mAP of sliding windows, and our re-ranking gives the best result (7.4 %).
+* HOG with a linear SVM is a weak classifier, so all numbers are low (for comparison, DPM reaches about 34 % and R-CNN about 58 % on this test set).
+* With more windows, random boxes overtake BING (8.4 % at 1000). The reason is localisation: BING's top 1000 cover 30 % of objects at IoU ≥ 0.7, random boxes 43 % (`results/figures/detection_voc.png`). A detector needs tight boxes, which agrees with Hosang et al. (TPAMI 2016): recall at stricter overlaps predicts detection quality. BING's coarse boxes, not its recall at IoU 0.5, limit it here.
+
+### 6.3 Multi-threading
+
+The released C++ code is fast because it uses all cores. Our first version did not scale (58 img/s on 1 thread, 57 on 4). We added two modes (`bing/model.py`, `bing/fast.py`):
+
+* **Window sizes in parallel** (`BING(n_jobs=4)`): the 36 window sizes of one image are processed by a thread pool. The gradient, bitwise scoring and greedy NMS of one size run in one GIL-free Numba call, and the largest score maps are scheduled first. This lowers the latency of a single image (useful for the webcam demo).
+* **Images in parallel** (`model.propose_batch(images, n_jobs=4)`): one image per thread, for throughput.
+
+VOC 2007 test images, 4-core CPU (`python scripts/measure_speed.py --voc-root ... --threads-only`):
+
+| Threads | window sizes in parallel | images in parallel | authors' C++ |
+|---|---|---|---|
+| 1 | 59 img/s | 57 img/s | 50 img/s |
+| 2 | 80 img/s | 104 img/s | |
+| 4 | 106 img/s | **186 img/s** | 196 img/s |
+
+The fused kernel orders tied scores differently from the single-threaded path, so about 1 % of the boxes in the top 1000 differ.
+
+## 7. Limitations and future work
+
+* Localisation is coarse (power-of-two sizes, 8-pixel stride). Our edge-snapping refinement and finer window sizes did not fix it (section 6.1); learned box regression is the next thing to try, and section 6.2 shows it is what detection needs.
+* The detector uses HOG and linear SVMs; stronger features (or a CNN classifier, as in R-CNN) would raise mAP a lot.
+* The re-ranker halves the speed (34 vs 67 img/s); a smaller tree model or fewer cues would recover some of it.
 * Training on real annotated images would close the gap between synthetic and real data.
-* Feeding the proposals into a classifier (HOG + SVM, or a small CNN) would give a complete detector.
 
 ## References
 

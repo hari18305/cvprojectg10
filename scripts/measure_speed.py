@@ -53,10 +53,43 @@ def stage_breakdown(model, img, reps=50):
     return {k: v / reps * 1e3 for k, v in st.items()}
 
 
+def threads_only(voc_root):
+    """Multi-threading on VOC test images, same session: one image's window sizes split
+    across threads (BING(n_jobs=...), lower latency), and one image per thread
+    (BING.propose_batch, higher throughput)."""
+    vpath = os.path.join(ROOT, "results", "voc.json")
+    V = json.load(open(vpath))
+    vm = BING.load(os.path.join(ROOT, "models", "bing_voc_rgb_released_sizes_greedy.pkl"))
+    vimgs = [cv2.imread(os.path.join(voc_root, "JPEGImages", i + ".jpg")) for i in V["ss_subset_ids"]]
+    set_threads(1)
+    out = {"window sizes in parallel": {}, "images in parallel": {}}
+    for n in (1, 2, 4):
+        vm.n_jobs = n
+        out["window sizes in parallel"][n] = f_ = max(fps(vm, vimgs) for _ in range(2))
+        print(f"[VOC speed, window sizes over {n} thread(s)] {f_:.1f} img/s")
+    vm.n_jobs = 1
+    for n in (1, 2, 4):
+        vm.propose_batch(vimgs[:8], n)  # warm-up
+        best = 0.0
+        for _ in range(2):
+            t = time.perf_counter()
+            vm.propose_batch(vimgs, n)
+            best = max(best, len(vimgs) / (time.perf_counter() - t))
+        out["images in parallel"][n] = best
+        print(f"[VOC speed, images over {n} thread(s)] {best:.1f} img/s")
+    V["speed_threads"] = out
+    json.dump(V, open(vpath, "w"), indent=1)
+    print("saved")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--voc-root")
+    ap.add_argument("--threads-only", action="store_true",
+                    help="only measure n_jobs (window sizes in parallel threads) on VOC")
     a = ap.parse_args()
+    if a.threads_only:
+        return threads_only(a.voc_root)
 
     path = os.path.join(ROOT, "results", "results_synthetic.json")
     R = json.load(open(path))

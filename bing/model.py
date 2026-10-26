@@ -7,7 +7,9 @@ Stage II: per-size calibration o = v_i * s + t_i so that scores of different
           rarely contain objects).
 """
 import pickle
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -15,10 +17,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 
 from .binary import BinaryScorer
-from .fast import HAVE_NUMBA, binary_scores_fast, greedy_nms, normed_gradient_fast
+from .fast import HAVE_NUMBA, binary_scores_fast, greedy_nms, normed_gradient_fast, size_pipeline
 from .features import FEAT, box_feature, normed_gradient, resize, to_colorspace
 from .metrics import iou_matrix
+from .refine import refine_boxes
 
+_LOCAL = threading.local()
 BASE_SIZES = (10, 20, 40, 80, 160, 320)      # window sizes given in the paper
 RELEASED_SIZES = (16, 32, 64, 128, 256, 512)  # sizes used by the authors' released code
 
@@ -26,7 +30,8 @@ RELEASED_SIZES = (16, 32, 64, 128, 256, 512)  # sizes used by the authors' relea
 class BING:
     def __init__(self, sizes=BASE_SIZES, colorspace="RGB", kernel="simple",
                  binary=True, n_basis=2, n_bits=4, per_size=130, nms_radius=2,
-                 C=10.0, interp="area", backend="numba", clip_large=False, nms="greedy", seed=0):
+                 C=10.0, interp="area", backend="numba", clip_large=False, nms="greedy",
+                 refine=None, n_jobs=1, seed=0):
         self.sizes = [(w, h) for w in sizes for h in sizes]
         self.colorspace, self.kernel = colorspace, kernel
         self.binary, self.n_basis, self.n_bits = binary, n_basis, n_bits
@@ -40,6 +45,11 @@ class BING:
         # neighbourhood, repeat); "local_max" keeps only strict local maxima of each score
         # map (our first version, which drops good windows on smooth score maps).
         self.nms = nms
+        # refine: None, or a dict for our gradient-guided box refinement (stage III),
+        # e.g. {"frac": 0.1, "min_gain": 1.0, "iters": 1, "top": 1000}; see bing/refine.py.
+        self.refine = refine
+        # n_jobs: threads used to score the window sizes of one image in parallel
+        self.n_jobs = n_jobs
         self.backend = backend if HAVE_NUMBA else "numpy"
         self.rng = np.random.default_rng(seed)
         self.w = None
@@ -163,26 +173,67 @@ class BING:
     def _stage1(self, img, sizes=None):
         """Yield (size, boxes, stage-I scores) for each quantised size."""
         im = self._prep(img)
+        sizes = sizes or self.sizes
+        jobs = getattr(self, "n_jobs", 1)
+        fused = self._fast() and self.binary and getattr(self, "nms", "") == "greedy"
+        if fused and getattr(_LOCAL, "in_batch", False):  # one image per thread: no inner threads
+            for size in sizes:
+                out = self._one_size(im, size, True)
+                if out is not None:
+                    yield out
+            return
+        if jobs > 1 and fused:
+            # Window sizes are independent, so they are scored in parallel threads (the Numba
+            # kernels and cv2.resize release the GIL). The largest score maps (smallest
+            # windows) go first, so no thread is left with a big job at the end.
+            order = sorted(sizes, key=lambda s: s[0] * s[1])
+            done = dict(zip(order, self._pool().map(lambda s: self._one_size(im, s, True), order)))
+            for size in sizes:
+                if done[size] is not None:
+                    yield done[size]
+            return
+        for size in sizes:
+            out = self._one_size(im, size)
+            if out is not None:
+                yield out
+
+    def _one_size(self, im, size, serial=False):
         H, W = im.shape[:2]
-        clip = getattr(self, "clip_large", False)
-        for size in (sizes or self.sizes):
-            w, h = size
-            if clip:
-                if w > W * 2 or h > H * 2:
-                    continue
-                w, h = min(w, W), min(h, H)
-            elif w > W * 1.3 or h > H * 1.3:
-                continue
-            rw, rh = int(round(FEAT * W / w)), int(round(FEAT * H / h))
-            if rw < FEAT or rh < FEAT:
-                continue
-            ng = self.ng_map(resize(im, rw, rh, self.interp))
-            sm = self.score_map(ng)
+        w, h = size
+        if getattr(self, "clip_large", False):
+            if w > W * 2 or h > H * 2:
+                return None
+            w, h = min(w, W), min(h, H)
+        elif w > W * 1.3 or h > H * 1.3:
+            return None
+        rw, rh = int(round(FEAT * W / w)), int(round(FEAT * H / h))
+        if rw < FEAT or rh < FEAT:
+            return None
+        r = resize(im, rw, rh, self.interp)
+        if serial:  # gradient + scores + NMS fused in one GIL-free call
+            ys, xs, sc = size_pipeline(r, self.scorer, self.nms_radius, self.per_size)
+        else:
+            sm = self.score_map(self.ng_map(r))
             ys, xs, sc = self._nms_topk(sm, self.per_size)
-            sx, sy = W / rw, H / rh
-            x1, y1 = xs * sx, ys * sy
-            bxs = np.stack([x1, y1, np.minimum(x1 + w, W), np.minimum(y1 + h, H)], 1)
-            yield size, bxs, sc  # key = nominal size, so calibration is per quantised size
+        sx, sy = W / rw, H / rh
+        x1, y1 = xs * sx, ys * sy
+        bxs = np.stack([x1, y1, np.minimum(x1 + w, W), np.minimum(y1 + h, H)], 1)
+        return size, bxs, sc  # key = nominal size, so calibration is per quantised size
+
+    def _pool(self):
+        n = getattr(self, "n_jobs", 1)
+        if getattr(self, "_executor", None) is None or self._executor_n != n:
+            self._executor, self._executor_n = ThreadPoolExecutor(n), n
+        return self._executor
+
+    def propose_batch(self, images, n_jobs=4, **kw):
+        """propose() for many images, one image per thread (higher throughput than n_jobs,
+        which splits a single image's window sizes across threads)."""
+        def one(img):
+            _LOCAL.in_batch = True
+            return self.propose(img, **kw)
+        with ThreadPoolExecutor(n_jobs) as ex:
+            return list(ex.map(one, images))
 
     def propose(self, img, top=None, calibrate=True, max_side=500):
         """Return (boxes [N,4] as x1,y1,x2,y2, objectness scores) sorted by score.
@@ -209,7 +260,14 @@ class BING:
         o = np.argsort(-s, kind="stable")
         if top:
             o = o[:top]
-        return b[o] / f, s[o]
+        b, s = b[o], s[o]
+        ref = getattr(self, "refine", None)
+        if ref:  # our stage III: gradient-guided refinement of the top boxes
+            k = ref.get("top", 1000)
+            b = b.copy()
+            b[:k] = refine_boxes(img, b[:k], frac=ref.get("frac", 0.1), iters=ref.get("iters", 1),
+                                 min_gain=ref.get("min_gain", 1.0))
+        return b / f, s
 
     def objectness_heatmap(self, img, top=2000):
         """Per-pixel sum of objectness of the top proposals (visualisation)."""
@@ -226,7 +284,7 @@ class BING:
     def save(self, path):
         with open(path, "wb") as f:
             pickle.dump({k: v for k, v in self.__dict__.items()
-                         if k not in ("scorer", "rng")}, f)
+                         if k not in ("scorer", "rng", "_executor", "_executor_n")}, f)
 
     @classmethod
     def load(cls, path, **override):
