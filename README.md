@@ -65,6 +65,7 @@ scripts/
   run_rerank_ablation.py  which cues the re-ranker relies on
   run_detection.py    detector built on proposals, VOC 2007 mAP per window source
   run_cnn_detection.py  the same with CNN features and box regression
+  run_colorspace.py   RGB vs HSV vs Gray on VOC 2007 (and on the real photos)
 baselines/original_bing/  build + run the authors' C++ BING (CLI entry point, OpenCV 4 patch)
 presentation/         slide deck (.pptx + .pdf) and the speaker script
 models/               trained models: synthetic (RGB / HSV / Gray) and PASCAL VOC 2007
@@ -151,6 +152,7 @@ python scripts/run_rerank_ablation.py --voc-root /data/voc/VOCdevkit/VOC2007   #
 python scripts/run_detection.py --voc-root /data/voc/VOCdevkit/VOC2007         # HOG detector (~2 h on 4 cores)
 python scripts/run_cnn_detection.py --voc-root /data/voc/VOCdevkit/VOC2007     # CNN-feature detector (~2 h; needs torch)
 python scripts/measure_speed.py --voc-root /data/voc/VOCdevkit/VOC2007 --threads-only
+python scripts/run_colorspace.py --voc-root /data/voc/VOCdevkit/VOC2007        # RGB vs HSV vs Gray (~15 min)
 ```
 
 To run the **authors' C++ code** on the same images and compare (needs `cmake`, a C++ compiler and `libopencv-dev`):
@@ -293,6 +295,7 @@ All figures are in `results/figures/`:
 * `top8_*.png`, `found_*.png`, `heatmaps_real.png`: qualitative results
 * `speed.png`, `stage_time.png`, `ablations.png`, `speed_threads.png`
 * `novelty_voc.png`, `novelty_example.png`: our multi-cue re-ranking (section 6.1)
+* `colorspace_voc.png`, `colorspace_ng.png`: RGB vs HSV vs Gray (section 6.4)
 * `detection_voc.png`: the detector built on the proposals (CNN features), and why localisation matters (section 6.2)
 
 ## 6. Our extensions beyond the paper
@@ -385,6 +388,23 @@ VOC 2007 test images, 4-core CPU (`python scripts/measure_speed.py --voc-root ..
 | 4 | 106 img/s | **186 img/s** | 196 img/s |
 
 The fused kernel orders tied scores differently from the single-threaded path, so about 1 % of the boxes in the top 1000 differ.
+
+### 6.4 Colour space comparison: RGB vs HSV vs Gray
+
+The normed gradient can be computed in any colour space; for colour images the strongest channel's gradient is kept. The paper uses RGB, HSV and Gray and merges their ranked lists ("BING-Diversified"). We trained one BING model per colour space on VOC 2007 trainval (final settings) and tested each on the full test set (`scripts/run_colorspace.py`, `results/colorspace.json`). Synthetic and real-photo columns use the models trained on the synthetic scenes; speed is one thread, measured in the same session for all three.
+
+| Colour space | VOC DR@100 | VOC DR@1000 | VOC DR@5000 | VOC MABO | VOC small objects DR@1000 | Synthetic DR@1000 | Real photos DR@1000 | img/s |
+|---|---|---|---|---|---|---|---|---|
+| RGB | 67.2 % | 94.0 % | 96.0 % | 0.651 | 39.3 % | 98.5 % | 87.9 % | 93 |
+| **HSV** | 68.9 % | 94.4 % | 96.4 % | 0.652 | 39.9 % | 96.7 % | 87.9 % | 92 |
+| Gray | 65.9 % | 93.2 % | 95.4 % | 0.647 | 34.5 % | 94.5 % | 91.4 % | 98 |
+| RGB + HSV + Gray, merged | 54.0 % | 88.0 % | 98.4 % | 0.646 | 4.3 % | – | – | – |
+
+* **On VOC, HSV is slightly best** at every budget, and wins 15 of the 20 classes at 100 proposals (RGB 4, Gray 1).
+* **Gray** is lowest on VOC: it misses edges between regions that differ only in colour, which hurts small objects most (34.5 % vs 39.3 %). With one channel it is the fastest.
+* **The ranking depends on the data.** On the synthetic scenes RGB is best (Lab 97.4 % sits between RGB and HSV); in HSV, hue is unstable in dark and grey regions and creates false edges (`results/figures/colorspace_ng.png`). On real photos, with models trained only on synthetic scenes, Gray transfers best (91.4 %).
+* **Merging the three lists** (round-robin, as BING-Diversified) finds the most objects at 5,000 proposals (98.4 %, and the best recall at IoU 0.7), but at 100 or 1,000 proposals each model only contributes a third of its best windows, so it is worse there.
+* We keep RGB as the default, as in the paper: it is never far from the best on any dataset.
 
 ## 7. Limitations and future work
 

@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bing import BING  # noqa: E402
 from bing.binary import approximate_filter  # noqa: E402
 from bing.datasets import ROOT, get_dataset  # noqa: E402
-from bing.features import normed_gradient, resize  # noqa: E402
+from bing.features import normed_gradient, resize, to_colorspace  # noqa: E402
 
 FIG = os.path.join(ROOT, "results", "figures")
 os.makedirs(FIG, exist_ok=True)
@@ -416,6 +416,64 @@ def threads_fig():
     fig.tight_layout(); save(fig, "speed_threads.png")
 
 
+@plt.rc_context({"font.size": 13, "axes.titlesize": 14})
+def colorspace_figs():
+    """RGB vs HSV vs Gray: normed-gradient maps of one photo, and VOC 2007 results."""
+    img = cv2.imread(os.path.join(ROOT, "data", "real", "motorcycle.jpg"))
+    fig, axs = plt.subplots(1, 4, figsize=(15, 3.4))
+    axs[0].imshow(img[..., ::-1]); axs[0].set_title("input", loc="left")
+    for ax, cs in zip(axs[1:], ("RGB", "HSV", "GRAY")):
+        g = normed_gradient(to_colorspace(img, cs))
+        ax.imshow(g, cmap="gray", vmin=0, vmax=255)
+        ax.set_title(f"normed gradient, {'Gray' if cs == 'GRAY' else cs}", loc="left")
+    for ax in axs:
+        ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+    fig.tight_layout(); save(fig, "colorspace_ng.png")
+
+    path = os.path.join(ROOT, "results", "colorspace.json")
+    if not os.path.exists(path):
+        return
+    R = json.load(open(path))["voc"]
+    names = {"RGB": "RGB", "HSV": "HSV", "GRAY": "Gray", "RGB + HSV + GRAY": "RGB + HSV + Gray"}
+    cols = {"RGB": SERIES[3], "HSV": SERIES[6], "GRAY": INK2, "RGB + HSV + GRAY": SERIES[2]}
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4.3), gridspec_kw={"width_ratios": [1.2, 1, 1]})
+    for k, r in R.items():
+        axs[0].plot(r["curve_n"], r["dr_curve"], color=cols[k], lw=2.2, ls="--" if "+" in k else "-", label=names[k])
+    axs[0].set_xscale("log"); axs[0].set_ylim(0, 1.02); axs[0].set_xlabel("Number of proposals")
+    axs[0].set_ylabel("Detection rate (IoU ≥ 0.5)"); axs[0].legend(loc="lower right", fontsize=11)
+    axs[0].set_title("Recall vs #proposals (VOC 2007)", loc="left")
+    singles = [k for k in R if "+" not in k]
+    groups = [g for g in ("small (<32 px)", "medium (32-96 px)", "large (>96 px)") if g in R[singles[0]]["by_size"]]
+    x = np.arange(len(groups)); w = 0.8 / len(singles)
+    for j, k in enumerate(singles):
+        v = [R[k]["by_size"][g]["dr@1000"] for g in groups]
+        xs = x + (j - (len(singles) - 1) / 2) * w
+        axs[1].bar(xs, v, w, color=cols[k], label=names[k])
+        for xi, vi in zip(xs, v):
+            axs[1].text(xi, vi + 0.015, f"{100 * vi:.0f}", ha="center", fontsize=10)
+    axs[1].set_xticks(x); axs[1].set_xticklabels([g.split(" (")[0] + "\n" + g.split(" (")[1].rstrip(")") for g in groups], fontsize=11)
+    axs[1].set_ylim(0, 1.25); axs[1].set_yticks([0, 0.25, 0.5, 0.75, 1.0]); axs[1].set_ylabel("DR@1000")
+    axs[1].grid(axis="x", visible=False); axs[1].legend(loc="upper left", ncol=3, fontsize=10.5)
+    axs[1].set_title("DR@1000 by object size", loc="left")
+    # which colour space wins depends on the data: DR@1000 on all three test sets
+    full = json.load(open(path))
+    S = json.load(open(os.path.join(ROOT, "results", "results_synthetic.json")))["ablations"]
+    sets = [("VOC 2007", {k: R[k]["dr_at"]["1000"] for k in singles}),
+            ("synthetic", {k: S[f"colour={k}"]["dr_at"]["1000"] for k in singles}),
+            ("real photos", {k: full["real"][k]["dr_at"]["1000"] for k in singles})]
+    x = np.arange(len(sets))
+    for j, k in enumerate(singles):
+        v = [d[k] for _, d in sets]
+        xs = x + (j - (len(singles) - 1) / 2) * w
+        axs[2].bar(xs, v, w, color=cols[k], label=names[k])
+        for xi, vi in zip(xs, v):
+            axs[2].text(xi, vi + 0.003, f"{100 * vi:.1f}", ha="center", fontsize=9.5)
+    axs[2].set_xticks(x); axs[2].set_xticklabels([n for n, _ in sets])
+    axs[2].set_ylim(0.85, 1.0); axs[2].set_ylabel("DR@1000"); axs[2].grid(axis="x", visible=False)
+    axs[2].set_title("Best colour space per dataset", loc="left")
+    fig.tight_layout(); save(fig, "colorspace_voc.png")
+
+
 def novelty_example(voc_root, img_id="001183", k=20):
     """BING's top-k windows before and after our re-ranking, on one VOC test image
     (ground-truth objects found by the top k in green, missed ones in red)."""
@@ -529,6 +587,7 @@ def main(tag="synthetic"):
     novelty_figs()
     detection_figs()
     threads_fig()
+    colorspace_figs()
     model = BING.load(os.path.join(ROOT, "models", f"bing_{tag}_rgb.pkl"))
     real = list(get_dataset("real", "test"))
     syn = list(get_dataset("synthetic", "test", 12))
