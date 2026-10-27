@@ -8,8 +8,8 @@ The same text is in the notes of each slide in `BING_Objectness_Group10.pptx`.
 | Ayyappadas M T | 4, 5, 6 | ~2:20 |
 | Hari Sankar A | 7, 8, 9 | ~2:20 |
 | Parthiv M | 10, 11, 12, 13 | ~3:25 |
-| Sai Kishen K M | 14, 15, 16 | ~2:45 |
-| **Total** | 1–16 | **~12:35** |
+| Sai Kishen K M | 14, 15, 16, 17 | ~3:25 |
+| **Total** | 1–17 | **~13:15** |
 
 ## Slide 1 — Abhinav Dileep (~35 s, 0:00–0:35)
 
@@ -77,8 +77,12 @@ Thank you, Parthiv. Proposals exist to feed a detector, so we built one, in two 
 
 ## Slide 15 — Sai Kishen K M (~40 s, 11:10–11:50)
 
+Here is the CNN detector on a few photos. It finds the motorbike, the brown horse and its rider, the astronaut and the cameraman, and names each with one of the twenty VOC classes. It also shows the limits: it misses the white horse, it only knows the VOC classes, so a cup or a phone gets no label, and its boxes can be loose, like the motorbike box that cuts off the front wheel. In short, BING says where objects are, and the detector says what they are.
+
+## Slide 16 — Sai Kishen K M (~40 s, 11:50–12:30)
+
 Our ablation studies show what matters. The simple minus-one, zero, one gradient mask works as well as Sobel. RGB is the best single colour space. Just two bits of gradient are enough. And because the model has only 64 weights, even 10 training images give good results. On the right is speed. With four threads, each working on its own image, our version reaches 294 images per second, close to the authors' C++ code at 196. The main limitation is that BING's boxes are coarse, because the window sizes are powers of two and the stride is 8 pixels.
 
-## Slide 16 — Sai Kishen K M (~45 s, 11:50–12:35)
+## Slide 17 — Sai Kishen K M (~45 s, 12:30–13:15)
 
 To conclude: simple gradients, a 64-weight linear model and bit operations find 94 percent of objects on PASCAL VOC, matching the authors' own code. Our novelty, multi-cue re-ranking, finds 71.0 percent of objects in the top 100 and raises small-object recall from 39.3 percent to 53.3 percent. Our detector reaches 19.1 percent mean average precision with CNN features, beats sliding windows by a wide margin, and shows that BING's loose boxes are what limits detection. In future we would like to make the boxes tighter and fine-tune the CNN features. Thank you. We are happy to take questions, and we can show a live webcam demo.

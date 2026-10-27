@@ -303,6 +303,7 @@ All figures are in `results/figures/`:
 * `speed.png`, `stage_time.png`, `ablations.png`, `speed_threads.png`
 * `novelty_voc.png`, `novelty_example.png`: our multi-cue re-ranking (section 6.1)
 * `colorspace_voc.png`, `colorspace_ng.png`: RGB vs HSV vs Gray (section 6.4)
+* `detector_examples.png`: the CNN detector on four photos (made with `scripts/demo.py --detect`)
 * `detection_voc.png`: the detector built on the proposals (CNN features), and why localisation matters (section 6.2)
 
 ## 6. Our extensions beyond the paper

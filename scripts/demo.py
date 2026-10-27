@@ -45,12 +45,18 @@ def draw(img, boxes, scores, top):
     return out
 
 
-def tidy(dets, max_n=5):
-    """Keep the best few detections for display: drop a box that overlaps a kept box of the
-    same class (IoU > 0.2) or of any class (IoU > 0.6)."""
+def tidy(dets, max_n=5, margin=0.12):
+    """Keep the best few detections for display: within `margin` of the best score of
+    their class, and not overlapping a kept box of the same class (IoU > 0.2) or of any
+    class (IoU > 0.6)."""
     from bing.metrics import iou_matrix
+    best = {}
+    for name, sc, _ in dets:
+        best[name] = max(best.get(name, -1e9), sc)
     kept = []
     for name, sc, box in dets:
+        if sc < best[name] - margin:
+            continue
         if all(iou_matrix([box], [k[2]])[0, 0] <= (0.2 if name == k[0] else 0.6) for k in kept):
             kept.append((name, sc, box))
         if len(kept) == max_n:
@@ -61,13 +67,17 @@ def tidy(dets, max_n=5):
 def draw_detections(img, dets):
     """dets: [(class name, score, box)] sorted by score."""
     out = img.copy()
+    H, W = img.shape[:2]
+    fs = max(0.5, min(W, H) / 600)  # label size grows with the image
     for name, sc, (x1, y1, x2, y2) in tidy(dets):
-        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), 2)
+        x1, y1 = int(max(0, x1)), int(max(0, y1))
+        x2, y2 = int(min(W - 1, x2)), int(min(H - 1, y2))
+        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), max(2, int(2 * fs)))
         label = f"{name} {sc:.2f}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(out, (x1, y1), (x1 + tw + 6, y1 + th + 6), (0, 220, 0), -1)
-        cv2.putText(out, label, (x1 + 3, y1 + th + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
+        lx = min(x1, W - tw - 6)
+        cv2.rectangle(out, (lx, y1), (lx + tw + 6, y1 + th + 8), (0, 220, 0), -1)
+        cv2.putText(out, label, (lx + 3, y1 + th + 3), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 1, cv2.LINE_AA)
     return out
 
 
