@@ -7,9 +7,9 @@ The same text is in the notes of each slide in `BING_Objectness_Group10.pptx`.
 | Abhinav Dileep | 1, 2, 3 | ~1:45 |
 | Ayyappadas M T | 4, 5, 6 | ~2:20 |
 | Hari Sankar A | 7, 8, 9 | ~2:20 |
-| Parthiv M | 10, 11, 12, 13 | ~3:00 |
+| Parthiv M | 10, 11, 12, 13 | ~3:25 |
 | Sai Kishen K M | 14, 15, 16 | ~2:45 |
-| **Total** | 1–16 | **~12:10** |
+| **Total** | 1–16 | **~12:35** |
 
 ## Slide 1 — Abhinav Dileep (~35 s, 0:00–0:35)
 
@@ -45,7 +45,7 @@ Thank you, Ayyappadas. On the left, the top row shows the gradient maps of a cof
 
 ## Slide 8 — Hari Sankar A (~40 s, 4:50–5:30)
 
-For evaluation we used three datasets. The main one is PASCAL VOC 2007, the paper's own benchmark: we train on 5,011 images and test on 4,952 images with over 12,000 objects. We also generated a synthetic benchmark of 900 images with cluttered backgrounds, and we annotated 58 objects in 10 real photographs that are never used for training. Every method is scored with the same evaluator. As baselines we used the authors' own C++ code, Selective Search, sliding windows and random boxes. For the detector, we report the standard VOC mean average precision.
+For evaluation we used three datasets. The main one is PASCAL VOC 2007, the paper's own benchmark: we train on 5,011 images and test on 4,952 images with over 12,000 objects. We also generated a synthetic benchmark of 900 images with cluttered backgrounds, and we annotated 58 objects in 10 real photographs that are never used for training. Every method is scored with the same evaluator. As baselines we used the authors' own C++ code, Selective Search, EdgeBoxes, sliding windows and random boxes. For the detector, we report the standard VOC mean average precision.
 
 ## Slide 9 — Hari Sankar A (~55 s, 5:30–6:25)
 
@@ -53,32 +53,32 @@ One design choice is the colour space in which the gradients are computed. Our t
 
 **→ Hand over to Parthiv M.**
 
-## Slide 10 — Parthiv M (~40 s, 6:25–7:05)
+## Slide 10 — Parthiv M (~55 s, 6:25–7:20)
 
-Thank you, Hari. This is our main result, on PASCAL VOC 2007. Our final BING finds 94.0% of all objects in its top 1000 proposals. The authors' own C++ code, on the same images with the same evaluator, finds 93.8%. So our rebuild matches the original. When we use the authors' own evaluator, their code scores 96.0 percent, against 96.2 percent reported in the paper, so the paper's result reproduces. The dashed blue line is our first version. It stopped at 75 percent, and I will explain why in a moment.
+Thank you, Hari. This is our main result, on PASCAL VOC 2007. Our final BING finds 94.0% of all objects in its top 1000 proposals. The authors' own C++ code, on the same images with the same evaluator, finds 93.8%. So our rebuild matches the original. When we use the authors' own evaluator, their code scores 96.0 percent, against 96.2 percent reported in the paper, so the paper's result reproduces. We also repeated the paper's generalisation test: trained on only six classes, BING still finds 91.1 percent of the objects of the other fourteen classes, close to 93.3 percent for the model trained on all twenty. So it learns generic objectness. The dashed blue line is our first version. It stopped at 75 percent, and I will explain why in a moment.
 
-## Slide 11 — Parthiv M (~35 s, 7:05–7:40)
+## Slide 11 — Parthiv M (~45 s, 7:20–8:05)
 
-This table compares BING with other methods. On VOC, BING finds more objects in the top 1000 than Selective Search, 94.0% against 88.2%, and it is about 70 times faster. But Selective Search draws tighter boxes, which shows in the MABO column. Compared with the authors' code, our version has the same accuracy on VOC, generalises better to real photos when trained only on synthetic data, and is slightly faster on one thread, 58 against 50 images per second.
+This table compares BING with other methods on all 4,952 VOC test images, all timed on the same machine. BING finds the most objects in the top 1000: 94.0 percent against 89.2 percent for Selective Search and 91.6 percent for EdgeBoxes, and it is about 15 times faster than EdgeBoxes and 77 times faster than Selective Search. But both draw tighter boxes, which shows in the MABO column. Compared with the authors' code, our version has the same accuracy on VOC, generalises better to real photos when trained only on synthetic data, and is faster on one thread, 98 against 76 images per second.
 
-## Slide 12 — Parthiv M (~50 s, 7:40–8:30)
+## Slide 12 — Parthiv M (~50 s, 8:05–8:55)
 
 Our first version followed the paper's text exactly and reached only 75 percent on VOC. By running the authors' released code, we found two details that are not in the paper. First, window sizes: the paper lists 10 to 320 pixels, but the code uses 16 to 512 and clips large windows to the image, and VOC has many large objects. Second, suppression: we kept only local peaks, but the code uses greedy suppression, which keeps more good windows. As the table shows, each helps, and together they close the gap. Below is recall per VOC class: thin objects like bottles are hardest; cats and dogs are easiest.
 
-## Slide 13 — Parthiv M (~55 s, 8:30–9:25)
+## Slide 13 — Parthiv M (~55 s, 8:55–9:50)
 
-Next, the results of our novelty on the full VOC 2007 test set. With re-ranking, the top 100 windows find 71.0 percent of all objects instead of 67.2 percent, and the top 1000 find 53.3 percent of small objects instead of 39.3 percent. The curve on the left is above BING's at every budget. The bars on the right show which cues matter: removing edge density hurts most, especially for small objects. The cost is speed, about 34 instead of 67 images per second, which is still about 40 times faster than Selective Search. We also tried snapping box edges to strong gradients and adding finer window sizes; neither helped on the full test set, so we report them as negative results. Sai Kishen will now show the detector we built on our proposals, and conclude.
+Next, the results of our novelty on the full VOC 2007 test set. With re-ranking, the top 100 windows find 71.0 percent of all objects instead of 67.2 percent, and the top 1000 find 53.3 percent of small objects instead of 39.3 percent. The curve on the left is above BING's at every budget. The bars on the right show which cues matter: removing edge density hurts most, especially for small objects. The cost is speed: 17 instead of 10 milliseconds per image on one thread, which is still about 46 times faster than Selective Search. We also tried snapping box edges to strong gradients and adding finer window sizes; neither helped on the full test set, so we report them as negative results. Sai Kishen will now show the detector we built on our proposals, and conclude.
 
 **→ Hand over to Sai Kishen K M.**
 
-## Slide 14 — Sai Kishen K M (~80 s, 9:25–10:45)
+## Slide 14 — Sai Kishen K M (~80 s, 9:50–11:10)
 
 Thank you, Parthiv. Proposals exist to feed a detector, so we built one, in two versions. Both use one linear classifier per VOC class, trained on VOC trainval with hard-negative mining. The first describes each window with HOG and a colour histogram, fully handcrafted. The second takes each window's average activations from a ResNet-50 pretrained on ImageNet, and adds box regression to tighten the boxes. With HOG the best result is 7.4 percent mean average precision. With CNN features it is 19.1 percent, again with our re-ranked top 100 windows. The chart shows the CNN version. At 100 windows, BING's boxes give 18.8 percent against 13.8 percent for random boxes and only 0.6 percent for sliding windows, so proposals matter. With 1000 windows, random boxes catch up and reach 16.0 percent. The plot on the right explains why: at an overlap of 0.7, BING's top 1000 cover only 30 percent of objects, against 43 percent for random boxes. A detector needs tight boxes, which matches what Hosang and colleagues found in their 2016 study of proposals.
 
-## Slide 15 — Sai Kishen K M (~40 s, 10:45–11:25)
+## Slide 15 — Sai Kishen K M (~40 s, 11:10–11:50)
 
-Our ablation studies show what matters. The simple minus-one, zero, one gradient mask works as well as Sobel. RGB is the best single colour space. Just two bits of gradient are enough. And because the model has only 64 weights, even 10 training images give good results. On the right is speed. With four threads, each working on its own image, our version reaches 186 images per second, close to the authors' C++ code at 196. The main limitation is that BING's boxes are coarse, because the window sizes are powers of two and the stride is 8 pixels.
+Our ablation studies show what matters. The simple minus-one, zero, one gradient mask works as well as Sobel. RGB is the best single colour space. Just two bits of gradient are enough. And because the model has only 64 weights, even 10 training images give good results. On the right is speed. With four threads, each working on its own image, our version reaches 294 images per second, close to the authors' C++ code at 196. The main limitation is that BING's boxes are coarse, because the window sizes are powers of two and the stride is 8 pixels.
 
-## Slide 16 — Sai Kishen K M (~45 s, 11:25–12:10)
+## Slide 16 — Sai Kishen K M (~45 s, 11:50–12:35)
 
 To conclude: simple gradients, a 64-weight linear model and bit operations find 94 percent of objects on PASCAL VOC, matching the authors' own code. Our novelty, multi-cue re-ranking, finds 71.0 percent of objects in the top 100 and raises small-object recall from 39.3 percent to 53.3 percent. Our detector reaches 19.1 percent mean average precision with CNN features, beats sliding windows by a wide margin, and shows that BING's loose boxes are what limits detection. In future we would like to make the boxes tighter and fine-tune the CNN features. Thank you. We are happy to take questions, and we can show a live webcam demo.

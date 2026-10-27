@@ -66,8 +66,11 @@ scripts/
   run_detection.py    detector built on proposals, VOC 2007 mAP per window source
   run_cnn_detection.py  the same with CNN features and box regression
   run_colorspace.py   RGB vs HSV vs Gray on VOC 2007 (and on the real photos)
+  run_unseen.py       train on 6 VOC classes, test on the 14 unseen ones (paper's test)
+  run_baselines_voc.py  Selective Search (all test images) and EdgeBoxes on VOC 2007
 baselines/original_bing/  build + run the authors' C++ BING (CLI entry point, OpenCV 4 patch)
 presentation/         slide deck (.pptx + .pdf) and the speaker script
+report/               final report (PDF) and its generator
 models/               trained models: synthetic (RGB / HSV / Gray) and PASCAL VOC 2007
 data/real/            10 real photos with 58 hand-labelled boxes
 tests/                unit tests (bitwise score == float score, numba == numpy, IoU …)
@@ -153,6 +156,9 @@ python scripts/run_detection.py --voc-root /data/voc/VOCdevkit/VOC2007         #
 python scripts/run_cnn_detection.py --voc-root /data/voc/VOCdevkit/VOC2007     # CNN-feature detector (~2 h; needs torch)
 python scripts/measure_speed.py --voc-root /data/voc/VOCdevkit/VOC2007 --threads-only
 python scripts/run_colorspace.py --voc-root /data/voc/VOCdevkit/VOC2007        # RGB vs HSV vs Gray (~15 min)
+python scripts/run_unseen.py --voc-root /data/voc/VOCdevkit/VOC2007            # unseen classes (~10 min)
+python scripts/run_baselines_voc.py --voc-root /data/voc/VOCdevkit/VOC2007     # Selective Search + EdgeBoxes (~20 min)
+python scripts/measure_speed.py --voc-root /data/voc/VOCdevkit/VOC2007 --methods  # one-thread speed of every method
 ```
 
 To run the **authors' C++ code** on the same images and compare (needs `cmake`, a C++ compiler and `libopencv-dev`):
@@ -194,15 +200,16 @@ Train on the 5,011 trainval images, test on the 4,952 test images (12,032 object
 
 | Method | DR@100 | DR@1000 | DR@5000 | MABO@1000 | img/s (1 thread) |
 |---|---|---|---|---|---|
-| **BING, ours (final)** | 67.2 % | **94.0 %** | **96.0 %** | **0.651** | **58** |
-| BING, authors' C++ code | 68.8 % | 93.8 % | 95.7 % | 0.646 | 50 (196 on 4 threads) |
+| **BING, ours (final)** | 67.2 % | **94.0 %** | 96.0 % | 0.651 | **98** |
+| BING, authors' C++ code | 68.8 % | 93.8 % | 95.7 % | 0.646 | 76 (300 on 4 threads) |
 | BING, paper (reported) | – | 96.2 % | 99.5 % | – | 300 (paper's hardware) |
-| Selective Search, fast (300 random test images)\* | 36.2 % | 88.2 % | 93.5 % | 0.707 | 0.8 (multi-threaded) |
+| EdgeBoxes (OpenCV, default parameters) | 65.8 % | 91.6 % | **97.6 %** | **0.753** | 6.5 |
+| Selective Search, fast mode | 38.1 % | 89.2 % | 94.6 % | 0.719 | 1.3 |
 | Random boxes | 46.5 % | 72.9 % | 86.8 % | 0.621 | – |
 
-\*Our BING on the same 300 images: DR@1000 94.3 %.
+All methods on all 4,952 test images (`scripts/run_baselines_voc.py`); all speeds measured on one thread on the same 4-core machine in one session (`scripts/measure_speed.py --methods`, and the authors' code with `run_original.sh`). BING finds the most objects up to 1,000 proposals and is 15–77× faster; EdgeBoxes and Selective Search draw tighter boxes, and EdgeBoxes overtakes BING at 5,000.
 
-The authors' code scores 96.0 % DR@1000 with its own evaluator (which uses VOC's inclusive-pixel box areas), so the paper's result reproduces; our evaluator gives it 93.8 %. Our implementation matches it. Our speed is 58 img/s on 1 thread. Section 6.3 adds multi-threading: 186 img/s on 4 threads, against 196 for the C++ code.
+The authors' code scores 96.0 % DR@1000 with its own evaluator (which uses VOC's inclusive-pixel box areas), so the paper's result reproduces; our evaluator gives it 93.8 %. Our implementation matches it, and is faster on one thread (98 vs 76 img/s). Section 6.3 adds multi-threading: 294 img/s on 4 threads, against 300 for the C++ code on the same machine, which matches the paper's "300 fps".
 
 **Two details the paper leaves out.** Our first version followed the paper's text and plateaued at 76 %:
 
@@ -242,18 +249,18 @@ Greedy NMS is now the default everywhere; the released window sizes are an optio
 | Selective Search (fast) | 77.6 % | 100.0 % | 0.885 |
 | Random boxes | 24.1 % | 48.3 % | 0.517 |
 
-### 5.4 Speed (images/s, 4 threads, synthetic images ≈450×300 px)
+### 5.4 Speed of the implementation variants (images/s, 4 threads, synthetic images ≈450×300 px)
 
 | Backend | Scoring | Resize | img/s |
 |---|---|---|---|
-| numpy | binary | INTER_AREA | 25 |
-| numpy | float (OpenCV correlation) | INTER_AREA | 38 |
-| numpy | binary | bilinear | 36 |
-| numpy | float | bilinear | 64 |
-| **Numba | binary (AND + POPCOUNT) | bilinear** | 80 |
-| Numba | float | bilinear | 147 |
+| numpy | binary | INTER_AREA | 46 |
+| numpy | float (OpenCV correlation) | INTER_AREA | 62 |
+| numpy | binary | bilinear | 61 |
+| numpy | float | bilinear | 99 |
+| **Numba | binary (AND + POPCOUNT) | bilinear** | 137 |
+| Numba | float | bilinear | 212 |
 
-One thread: 88 img/s (Numba, binary, bilinear). Per image (INTER_AREA): resize 12.1 ms, gradient 1.3 ms, bitwise scoring 5.1 ms, greedy NMS 3.8 ms.
+One thread: 157 img/s (Numba, binary, bilinear). Per image (INTER_AREA): resize 6.6 ms, gradient 0.8 ms, bitwise scoring 3.2 ms, greedy NMS 2.1 ms. The speeds in sections 5.1, 5.4, 6.1 and 6.3 were measured in one session on the same machine.
 
 ### 5.5 Ablations (DR@1000 on the synthetic test set)
 
@@ -317,8 +324,8 @@ Full VOC 2007 test set (4,952 images, 12,032 objects), `scripts/run_novelty.py` 
 
 | Method | DR@100 | DR@1000 | DR@5000 | MABO@1000 | small objects DR@1000 | AUC | img/s |
 |---|---|---|---|---|---|---|---|
-| BING (final) | 67.2 % | 94.0 % | 96.0 % | 0.651 | 39.3 % | 0.719 | 67 |
-| **BING + multi-cue re-ranking (ours)** | **71.0 %** | **94.7 %** | 96.0 % | **0.653** | **53.3 %** | **0.741** | 34 |
+| BING (final) | 67.2 % | 94.0 % | 96.0 % | 0.651 | 39.3 % | 0.719 | 98 |
+| **BING + multi-cue re-ranking (ours)** | **71.0 %** | **94.7 %** | 96.0 % | **0.653** | **53.3 %** | **0.741** | 59 |
 | re-ranking without colour contrast | 69.5 % | 94.5 % | 96.0 % | 0.652 | 51.6 % | 0.732 | |
 | re-ranking without edge density | 69.4 % | 94.3 % | 96.0 % | 0.651 | 45.0 % | 0.732 | |
 | re-ranking without geometry | 70.2 % | 94.6 % | 96.0 % | 0.652 | 54.8 % | 0.736 | |
@@ -327,7 +334,7 @@ Small objects are those under 32 px (516 of the 12,032). DR@5000 cannot change, 
 
 * Re-ranking raises recall at every budget (`results/figures/novelty_voc.png`). The gain is largest at small budgets, which is where a detector works.
 * Every cue group helps. Edge density matters most for small objects: without it, small-object recall falls from 53.3 % to 45.0 %.
-* The cost is speed: 34 instead of 67 img/s, still about 40 times faster than Selective Search.
+* The cost is speed: 17 instead of 10 ms per image on one thread, still about 46 times faster than Selective Search.
 * **Tried and rejected** (kept in the repository as negative results): snapping each box side to the strongest nearby edge line (`bing/refine.py`), and adding intermediate window sizes. On a 300-image subset both looked promising, but on the full test set neither raised recall (DR@1000 93.6 % and 93.9 %).
 
 `results/figures/novelty_example.png` shows one test image: BING's top 20 windows find one of three objects, the re-ranked top 20 find all three.
@@ -374,18 +381,18 @@ The demo uses this detector when torch is installed: `python scripts/demo.py --i
 
 ### 6.3 Multi-threading
 
-The released C++ code is fast because it uses all cores. Our first version did not scale (58 img/s on 1 thread, 57 on 4). We added two modes (`bing/model.py`, `bing/fast.py`):
+The released C++ code is fast because it uses all cores. Our first version did not scale with threads. We added two modes (`bing/model.py`, `bing/fast.py`):
 
 * **Window sizes in parallel** (`BING(n_jobs=4)`): the 36 window sizes of one image are processed by a thread pool. The gradient, bitwise scoring and greedy NMS of one size run in one GIL-free Numba call, and the largest score maps are scheduled first. This lowers the latency of a single image (useful for the webcam demo).
 * **Images in parallel** (`model.propose_batch(images, n_jobs=4)`): one image per thread, for throughput.
 
-VOC 2007 test images, 4-core CPU (`python scripts/measure_speed.py --voc-root ... --threads-only`):
+VOC 2007 test images, 4-core CPU, one session (`python scripts/measure_speed.py --voc-root ... --threads-only`; the authors' code timed on the same machine):
 
 | Threads | window sizes in parallel | images in parallel | authors' C++ |
 |---|---|---|---|
-| 1 | 59 img/s | 57 img/s | 50 img/s |
-| 2 | 80 img/s | 104 img/s | |
-| 4 | 106 img/s | **186 img/s** | 196 img/s |
+| 1 | 105 img/s | 98 img/s | 76 img/s |
+| 2 | 137 img/s | 179 img/s | |
+| 4 | 186 img/s | **294 img/s** | 300 img/s |
 
 The fused kernel orders tied scores differently from the single-threaded path, so about 1 % of the boxes in the top 1000 differ.
 
@@ -405,6 +412,19 @@ The normed gradient can be computed in any colour space; for colour images the s
 * **The ranking depends on the data.** On the synthetic scenes RGB is best (Lab 97.4 % sits between RGB and HSV); in HSV, hue is unstable in dark and grey regions and creates false edges (`results/figures/colorspace_ng.png`). On real photos, with models trained only on synthetic scenes, Gray transfers best (91.4 %).
 * **Merging the three lists** (round-robin, as BING-Diversified) finds the most objects at 5,000 proposals (98.4 %, and the best recall at IoU 0.7), but at 100 or 1,000 proposals each model only contributes a third of its best windows, so it is worse there.
 * We keep RGB as the default, as in the paper: it is never far from the best on any dataset.
+
+### 6.5 Generalisation to unseen classes
+
+The paper checks that BING learns generic objectness by training on six classes (bird, car, cat, cow, dog, sheep) and testing on the other 14. We repeated this (`scripts/run_unseen.py`, `results/unseen.json`): the model is trained on the 2,006 trainval images that contain a seen class, with only the seen-class boxes as objects.
+
+| Model | Test objects | DR@100 | DR@1000 | DR@5000 |
+|---|---|---|---|---|
+| trained on 6 classes | 14 unseen classes (9,039) | 63.5 % | 91.1 % | 95.2 % |
+| trained on 20 classes | 14 unseen classes | 66.6 % | 93.3 % | 95.5 % |
+| trained on 6 classes | 6 seen classes (2,993) | 72.6 % | 97.2 % | 98.0 % |
+| trained on 20 classes | 6 seen classes | 69.2 % | 96.2 % | 97.7 % |
+
+On classes it never saw, the 6-class model finds only 2.2 points fewer objects at 1,000 proposals than the model trained on all 20, which supports the paper's claim. On its own six classes it is slightly better than the 20-class model.
 
 ## 7. Limitations and future work
 

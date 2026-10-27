@@ -53,6 +53,41 @@ def stage_breakdown(model, img, reps=50):
     return {k: v / reps * 1e3 for k, v in st.items()}
 
 
+def methods(voc_root, n=100):
+    """Seconds per image on one thread, same session, first n of the 300 VOC speed images."""
+    import pickle
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import run_baselines_voc as rb
+    vpath = os.path.join(ROOT, "results", "voc.json")
+    V = json.load(open(vpath))
+    imgs = [cv2.imread(os.path.join(voc_root, "JPEGImages", i + ".jpg")) for i in V["ss_subset_ids"][:n]]
+    set_threads(1)
+    rb.init(voc_root)
+    vm = BING.load(os.path.join(ROOT, "models", "bing_voc_rgb_released_sizes_greedy.pkl"))
+    with open(os.path.join(ROOT, "models", "rerank_voc.pkl"), "rb") as f:
+        rr = pickle.load(f)
+    try:
+        from threadpoolctl import threadpool_limits
+        limit = threadpool_limits(1)  # the re-ranker's tree model uses OpenMP
+    except ImportError:
+        limit = None
+    fns = {"BING (ours)": lambda im: vm.propose(im),
+           "BING + multi-cue re-ranking (ours)": lambda im: rr.rerank(im, *vm.propose(im)),
+           "Selective Search (fast)": rb.selective_search,
+           "EdgeBoxes": rb.edge_boxes}
+    out = {}
+    for name, fn in fns.items():
+        fn(imgs[0])  # warm-up
+        t = time.perf_counter()
+        for im in imgs:
+            fn(im)
+        out[name] = (time.perf_counter() - t) / len(imgs)
+        print(f"[1 thread] {name:36s} {1e3 * out[name]:8.1f} ms/img  ({1 / out[name]:6.1f} img/s)", flush=True)
+    V["speed_methods_1_thread_sec"] = out
+    json.dump(V, open(vpath, "w"), indent=1)
+    print("saved")
+
+
 def threads_only(voc_root):
     """Multi-threading on VOC test images, same session: one image's window sizes split
     across threads (BING(n_jobs=...), lower latency), and one image per thread
@@ -85,9 +120,13 @@ def threads_only(voc_root):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--voc-root")
+    ap.add_argument("--methods", action="store_true",
+                    help="only compare methods on one thread (BING, + re-ranking, Selective Search, EdgeBoxes)")
     ap.add_argument("--threads-only", action="store_true",
                     help="only measure n_jobs (window sizes in parallel threads) on VOC")
     a = ap.parse_args()
+    if a.methods:
+        return methods(a.voc_root)
     if a.threads_only:
         return threads_only(a.voc_root)
 

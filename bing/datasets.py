@@ -189,12 +189,29 @@ class VOCDataset:
     """PASCAL VOC 2007 (as used in the BING paper: train on trainval, test on test).
 
     root: path to VOCdevkit/VOC2007.  'difficult' objects are ignored, as in the paper.
+    classes: keep only objects of these classes, and only images that contain one
+    (used to train on some classes and test on unseen ones).
     """
 
-    def __init__(self, root, split="trainval", limit=None):
+    def __init__(self, root, split="trainval", limit=None, classes=None):
         self.root = root
+        self.classes = set(classes) if classes else None
         with open(os.path.join(root, "ImageSets", "Main", f"{split}.txt")) as f:
-            self.ids = [l.strip() for l in f if l.strip()][:limit]
+            ids = [l.strip() for l in f if l.strip()]
+        if self.classes:
+            ids = [i for i in ids if any(n in self.classes for n, _ in self._objects(i))]
+        self.ids = ids[:limit]
+
+    def _objects(self, i):
+        tree = ET.parse(os.path.join(self.root, "Annotations", i + ".xml"))
+        out = []
+        for obj in tree.findall("object"):
+            if int(obj.findtext("difficult", "0")):
+                continue
+            bb = obj.find("bndbox")
+            x1, y1, x2, y2 = (float(bb.findtext(k)) for k in ("xmin", "ymin", "xmax", "ymax"))
+            out.append((obj.findtext("name"), [x1 - 1, y1 - 1, x2, y2]))  # VOC is 1-based, inclusive
+        return out
 
     def __len__(self):
         return len(self.ids)
@@ -202,14 +219,7 @@ class VOCDataset:
     def __iter__(self):
         for i in self.ids:
             img = cv2.imread(os.path.join(self.root, "JPEGImages", i + ".jpg"))
-            tree = ET.parse(os.path.join(self.root, "Annotations", i + ".xml"))
-            boxes = []
-            for obj in tree.findall("object"):
-                if int(obj.findtext("difficult", "0")):
-                    continue
-                bb = obj.find("bndbox")
-                x1, y1, x2, y2 = (float(bb.findtext(k)) for k in ("xmin", "ymin", "xmax", "ymax"))
-                boxes.append([x1 - 1, y1 - 1, x2, y2])  # VOC is 1-based, inclusive
+            boxes = [b for n, b in self._objects(i) if self.classes is None or n in self.classes]
             yield img, np.array(boxes, float).reshape(-1, 4)
 
 

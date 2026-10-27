@@ -316,7 +316,8 @@ def voc_figs():
     methods = [(FINAL, SERIES[0], "-", "BING (ours, final)"),
                ("BING (ours)", SERIES[0], "--", "BING (ours, first version)"),
                ("BING (authors' C++)", SERIES[1], "-", "BING (authors' C++)"),
-               ("Selective Search (fast)", SERIES[4], "-", f"Selective Search ({len(V['ss_subset_ids'])} imgs)"),
+               ("Selective Search (fast), all test images", SERIES[4], "-", "Selective Search (fast)"),
+               ("EdgeBoxes", SERIES[2], "-", "EdgeBoxes"),
                ("Random boxes", SERIES[6], "-", "Random boxes")]
     for name, col, ls, lab in methods:
         r = V.get(name)
@@ -399,12 +400,16 @@ def threads_fig():
     T, A = V.get("speed_threads"), V.get("BING (authors' C++)", {})
     if not T:
         return
-    rows = [("authors' C++, 1 thread", 1 / A["sec_per_img_reported"], SERIES[1]),
-            ("ours, 1 thread", V.get("speed_ours", {}).get("1 thread", T["window sizes in parallel"]["1"]), SERIES[0]),
+    same = A.get("speed_same_session")  # authors' code timed on the same machine as ours
+    M = V.get("speed_methods_1_thread_sec", {})
+    one = 1 / M["BING (ours)"] if "BING (ours)" in M else V.get("speed_ours", {}).get("1 thread")
+    c1 = same["1 thread"] if same else 1 / A["sec_per_img_reported"]
+    c4 = same["4 threads"] if same else 1 / A["sec_per_img_reported_4_threads"]
+    rows = [("authors' C++, 1 thread", c1, SERIES[1]),
+            ("ours, 1 thread", one, SERIES[0]),
             ("ours, 4 threads:\nwindow sizes in parallel", T["window sizes in parallel"]["4"], SERIES[0]),
-            ("ours, 4 threads:\nimages in parallel", T["images in parallel"]["4"], SERIES[0])]
-    if "sec_per_img_reported_4_threads" in A:
-        rows.append(("authors' C++, 4 threads", 1 / A["sec_per_img_reported_4_threads"], SERIES[1]))
+            ("ours, 4 threads:\nimages in parallel", T["images in parallel"]["4"], SERIES[0]),
+            ("authors' C++, 4 threads", c4, SERIES[1])]
     fig, ax = plt.subplots(figsize=(7.5, 4.2))
     y = np.arange(len(rows))[::-1]
     ax.barh(y, [r[1] for r in rows], color=[r[2] for r in rows])

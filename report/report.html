@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Fast Object Proposal Generation Using Handcrafted Gradient Features</title>
+<style>
+@page { size: A4; margin: 18mm 15mm 18mm 15mm; }
+body { font: 9.6pt/1.32 "Liberation Serif", "Times New Roman", Times, serif; color: #000; margin: 0; }
+h1 { font-size: 21pt; line-height: 1.15; text-align: center; font-weight: normal; margin: 0 0 10pt; }
+.authors { display: flex; justify-content: center; flex-wrap: wrap; gap: 4pt 20pt; margin-bottom: 5pt }
+.au { text-align: center; font-size: 10pt }
+.au span { display: block; font-size: 8.5pt; font-style: italic }
+.course { text-align: center; font-size: 9pt; margin-bottom: 12pt }
+.cols { column-count: 2; column-gap: 7mm; text-align: justify; hyphens: auto; }
+.abstract { font-weight: bold; font-size: 9pt }
+.abstract i { font-weight: bold }
+.kw { font-size: 9pt; font-weight: bold; font-style: italic; margin-bottom: 6pt }
+h2 { font-size: 9.6pt; font-weight: normal; text-align: center; font-variant: small-caps; margin: 10pt 0 4pt; letter-spacing: .02em; break-after: avoid }
+h3 { font-size: 9.6pt; font-weight: normal; font-style: italic; margin: 6pt 0 2pt; break-after: avoid }
+p { margin: 0 0 4pt; text-indent: 1em }
+p.ni, .abstract p { text-indent: 0 }
+ul { margin: 2pt 0 4pt 0; padding-left: 14pt }
+li { margin-bottom: 1.5pt }
+figure { margin: 6pt 0 8pt; break-inside: avoid; text-align: center }
+figure.wide { column-span: all; }
+figure img { max-width: 100%; }
+figcaption { font-size: 8pt; text-align: justify; margin-top: 3pt }
+table { border-collapse: collapse; width: 100%; font-size: 8pt; margin: 4pt 0 2pt; break-inside: avoid; text-align: left }
+th, td { padding: 1.6pt 3pt; border-bottom: .5pt solid #999 }
+th { border-top: 1pt solid #000; border-bottom: .8pt solid #000; font-weight: bold }
+tbody tr:last-child td { border-bottom: 1pt solid #000 }
+td:not(:first-child), th:not(:first-child) { text-align: right; white-space: nowrap }
+.tcap { font-size: 8pt; text-align: center; font-variant: small-caps; margin-top: 8pt; break-after: avoid }
+.tnote { font-size: 7.6pt; margin-bottom: 8pt; text-indent: 0 }
+.eq { text-align: center; margin: 4pt 0; text-indent: 0; font-style: italic }
+.refs p { text-indent: -1.6em; padding-left: 1.6em; font-size: 8.2pt; margin-bottom: 2pt }
+sub, sup { font-size: 70% }
+</style></head><body>
+<h1>Fast Object Proposal Generation Using Handcrafted Gradient Features: Reproducing and Extending BING</h1>
+<div class="authors"><div class="au"><b>Abhinav Dileep</b><span>AM.SC.U4CSE23202</span></div><div class="au"><b>Ayyappadas M T</b><span>AM.SC.U4CSE23209</span></div><div class="au"><b>Hari Sankar A</b><span>AM.SC.U4CSE23221</span></div><div class="au"><b>Parthiv M</b><span>AM.SC.U4CSE23240</span></div><div class="au"><b>Sai Kishen K M</b><span>AM.SC.U4CSE23248</span></div></div>
+<div class="course">23CSE373 Computer Vision · Group 10</div>
+<div class="cols">
+
+<div class="abstract"><p><i>Abstract</i>—Object proposal methods reduce the 10<sup>5</sup>–10<sup>6</sup> windows a detector would otherwise scan to about a thousand candidates. BING (Cheng et al., CVPR 2014) does this at 300 frames per second with an 8×8 normed-gradient feature, a 64-weight linear model and bitwise AND/POPCOUNT scoring. We re-implemented BING from scratch in Python with compiled kernels and evaluated it on PASCAL VOC 2007 against the authors' own C++ code: our version finds 94.0% of objects in its top 1000 proposals against 93.8% for the original, after we identified two details that the paper's text omits. We extend BING with a third stage that re-ranks its windows using colour-contrast, edge-density and geometric cues, which raises recall in the top 100 from 67.2% to 71.0% and small-object recall from 39.3% to 53.3%. We also compare RGB, HSV and grayscale gradients, test generalisation to unseen classes, compare with Selective Search and EdgeBoxes, build complete detectors on the proposals (up to 19.1% mAP), and multi-thread the implementation to 294 images per second, against 300 for the authors' code on the same machine.</p></div>
+<p class="kw">Index Terms—object proposals, objectness, BING, normed gradients, binarization, PASCAL VOC.</p>
+
+<h2>I. Introduction</h2>
+<p class="ni">Classic object detectors classify every position, scale and aspect ratio of a sliding window. That is 10<sup>5</sup> to 10<sup>6</sup> windows per image, and almost all of them are background. Object proposal methods first rank windows by a cheap, class-agnostic "objectness" score, so that an expensive classifier only examines the best thousand or so [3], [5]. BING [1] is among the fastest proposal methods: it observes that objects have closed boundaries, so a window around an object, shrunk to 8×8 pixels, shows a characteristic ring of strong gradients. A 64-weight linear model learns this pattern, and binarizing the model and the features turns each window's score into a few bitwise operations.</p>
+<p>This project re-implements, evaluates and extends BING. Our contributions are:</p>
+<ul>
+<li>A from-scratch Python implementation with Numba-compiled kernels for the paper's bitwise algorithm, and a head-to-head comparison with the authors' released C++ code on PASCAL VOC 2007, which revealed two implementation details missing from the paper.</li>
+<li>A novelty: <i>multi-cue re-ranking</i>, a third stage that re-scores BING's windows with handcrafted colour, edge and geometric cues, with an ablation of each cue group.</li>
+<li>A comparison of RGB, HSV and grayscale gradients; a generalisation test on unseen classes, following the paper; and a comparison with Selective Search [2] and EdgeBoxes [4] on the full test set.</li>
+<li>Complete detectors built on the proposals, with handcrafted (HOG) and CNN features, and multi-threading that brings our speed to that of the C++ code.</li>
+</ul>
+
+<h2>II. Related Work</h2>
+<p class="ni">Alexe et al. [3] introduced objectness as a generic measure combining saliency, colour contrast, edge density and superpixel straddling. Selective Search [2] groups superpixels hierarchically and returns the bounding boxes of the groups; its boxes fit objects tightly but it needs about a second per image. EdgeBoxes [4] scores a window by the number of edge contours wholly inside it. BING [1] trades box precision for speed. Hosang et al. [5] compared these methods systematically and showed that recall at higher overlaps predicts detection quality better than recall at IoU 0.5. R-CNN [6] popularised detection on top of proposals with CNN features; Dalal and Triggs' HOG [7] is the classic handcrafted descriptor.</p>
+
+<h2>III. Method</h2>
+<h3>A. Normed gradients and the 8×8 window feature</h3>
+<p class="ni">For each pixel the normed gradient (NG) is <i>g</i> = min(|<i>g<sub>x</sub></i>| + |<i>g<sub>y</sub></i>|, 255), computed with the mask [−1, 0, 1] in each colour channel; the strongest channel is kept. Windows take 36 quantised sizes (<i>w</i>, <i>h</i>) ∈ {16, 32, …, 512}<sup>2</sup>. For each size the whole image is resized to (8<i>W</i>/<i>w</i>, 8<i>H</i>/<i>h</i>), so that every 8×8 patch of the resized NG map is the 64-D feature of one window.</p>
+<h3>B. Two-stage linear model</h3>
+<p class="ni">Stage I is a linear SVM <b>w</b> ∈ ℝ<sup>64</sup> trained on the NG features of ground-truth boxes (and their mirror images) against random background windows; the score of a window is <i>s</i> = ⟨<b>w</b>, <b>g</b>⟩. Greedy non-maximum suppression keeps up to 130 windows per size. Stage II calibrates each size with <i>o</i> = <i>v<sub>i</sub></i>·<i>s</i> + <i>t<sub>i</sub></i>, learned by logistic regression on training windows labelled by IoU ≥ 0.5, because sizes such as 16×512 rarely contain objects. Windows from all sizes are sorted by <i>o</i>.</p>
+<h3>C. Binarized scoring</h3>
+<p class="ni">The filter is approximated with <i>N<sub>w</sub></i> = 2 binary bases, <b>w</b> ≈ Σ<sub><i>j</i></sub> β<sub><i>j</i></sub><b>a</b><sub><i>j</i></sub> with <b>a</b><sub><i>j</i></sub> ∈ {−1, +1}<sup>64</sup>, and each NG value by its top <i>N<sub>g</sub></i> = 4 bits, <b>g</b> ≈ Σ<sub><i>k</i></sub> 2<sup>8−<i>k</i></sup><b>b</b><sub><i>k</i></sub>. Each 64-bit vector fits in one machine word, and</p>
+<p class="eq">⟨<b>a</b><sub>j</sub>, <b>b</b><sub>k</sub>⟩ = 2·popcnt(<b>a</b><sub>j</sub><sup>+</sup> AND <b>b</b><sub>k</sub>) − popcnt(<b>b</b><sub>k</sub>),</p>
+<p class="ni">where <b>a</b><sup>+</sup> marks the +1 entries. A window then costs 12 POPCOUNTs instead of 64 multiply-adds. Bit-planes are built with shift and OR operations over rows and columns (the paper's Algorithm 2). Unit tests confirm that the bitwise score equals the floating-point score of the approximated filter and features.</p>
+<h3>D. Implementation</h3>
+<p class="ni">Our implementation uses NumPy, OpenCV and scikit-learn, with Numba compiling the gradient, bit-packing, scoring and suppression loops to machine code. It follows two details of the released code that the paper does not state (Section V-B): window sizes 16–512 clipped to the image, and greedy suppression.</p>
+<h3>E. Novelty: multi-cue re-ranking (stage III)</h3>
+<p class="ni">BING ranks windows with a single cue, its edge template. Stage III re-scores BING's windows with 16 handcrafted values per window, each read in constant time from integral images: the Lab colour contrast and lightness difference between the window and a surrounding ring (the window grown by a quarter of its size on each side); the mean gradient energy inside, in the ring, and their log-ratio; the window's centre, distance to the image centre, log area, log aspect ratio, relative width and height, ring share and border contact; and BING's calibrated score and rank. A gradient-boosted tree classifier, trained on the proposals of 2,500 VOC trainval images (positive if IoU ≥ 0.5 with an object), combines them, and windows are re-sorted by its probability. No deep network is involved.</p>
+<h3>F. Detectors on the proposals</h3>
+<p class="ni">To measure what the proposals are worth, we built a detector in two versions. The handcrafted version warps each window (padded by 1/8) to 64×64 and describes it with HOG [7] (1,764 values) and an 8×4 hue-saturation histogram. The CNN version passes the image once through a ResNet-50 [9] pre-trained on ImageNet, kept frozen, and describes each window by the mean conv4 and conv5 activations inside it (3,072 values, read from integral images of the feature maps). Both train 20 one-vs-rest linear SVMs on VOC trainval with one round of hard-negative mining; the CNN version adds class-specific box regression as in R-CNN [6]. Detections are filtered with per-class non-maximum suppression and scored with the VOC 2007 11-point average precision.</p>
+<h3>G. Multi-threading</h3>
+<p class="ni">The gradient, scoring and suppression of one window size run inside a single compiled function that releases Python's global interpreter lock. Window sizes of one image can then be processed by a thread pool (lower latency), or whole images can be distributed over threads (higher throughput).</p>
+
+<h2>IV. Experimental Setup</h2>
+<p class="ni"><i>Data.</i> PASCAL VOC 2007 [8], following the paper: train on the 5,011 trainval images, test on the 4,952 test images (12,032 objects; "difficult" objects ignored). We also use a synthetic benchmark of 600/300 images of textured shapes on cluttered backgrounds, and 10 real photographs with 58 annotated objects that are never used for training.</p>
+<p><i>Metrics.</i> The detection rate DR@<i>N</i> is the share of objects covered by at least one of the top <i>N</i> proposals with IoU ≥ 0.5. MABO is the mean (over classes) of the average best overlap per object, measuring box tightness. For detection we report the mean average precision (mAP). All methods are scored by the same evaluator. Speeds were measured on one 4-core CPU in a single session.</p>
+
+<h2>V. Results</h2>
+<h3>A. Reproducing BING on PASCAL VOC 2007</h3>
+<p class="ni">Table I compares our implementation with the authors' C++ code run on the same images and scored by our evaluator. The two agree within 0.2 points at every budget. With the authors' own evaluator, which counts box areas with VOC's inclusive pixel convention, their code scores 96.0% at 1000 proposals, close to the 96.2% reported in the paper.</p>
+<div class="tcap">Table I. BING on the VOC 2007 test set</div>
+<table class=""><thead><tr><th>Method</th><th>DR@100</th><th>DR@1000</th><th>DR@5000</th><th>MABO</th></tr></thead><tbody><tr><td><b>BING, ours</b></td><td>67.2%</td><td><b>94.0%</b></td><td>96.0%</td><td>0.651</td></tr><tr><td>BING, authors' C++</td><td>68.8%</td><td>93.8%</td><td>95.7%</td><td>0.646</td></tr><tr><td>BING, paper [1]</td><td>–</td><td>96.2%</td><td>99.5%</td><td>–</td></tr></tbody></table>
+<h3>B. Two details the paper leaves out</h3>
+<p class="ni">Our first version followed the paper's text and reached only 75.1%. Running the released code showed two differences (Table II). Its window sizes are 16–512 rather than 10–320, with windows up to twice the image size clipped to it, so near full-image boxes exist; VOC has many large objects. Its suppression is greedy: it accepts the best window, blocks a 5×5 neighbourhood and repeats, whereas keeping only local maxima of each score map discards good windows on smooth maps. Together they close the gap.</p>
+<div class="tcap">Table II. Effect of the two undocumented details</div>
+<table class=""><thead><tr><th>Our BING on VOC 2007</th><th>DR@1000</th><th>DR@5000</th><th>MABO</th></tr></thead><tbody><tr><td>Paper's text (sizes 10–320, local maxima)</td><td>75.1%</td><td>75.8%</td><td>0.576</td></tr><tr><td>+ released sizes (16–512, clipped)</td><td>79.2%</td><td>79.7%</td><td>0.607</td></tr><tr><td>+ greedy NMS only</td><td>92.2%</td><td>94.4%</td><td>0.621</td></tr><tr><td><b>Both (final)</b></td><td><b>94.0%</b></td><td>96.0%</td><td>0.651</td></tr></tbody></table>
+<figure class="wide"><img src="../results/figures/voc_curves.png" alt=""><figcaption>Fig. 1. Recall versus number of proposals (left) and MABO (right) on VOC 2007. Our final BING matches the authors' code; our first version, following the paper's text, plateaus at 75%.</figcaption></figure>
+<h3>C. Comparison with other proposal methods</h3>
+<p class="ni">Table III compares BING with Selective Search (OpenCV's fast mode) and EdgeBoxes (OpenCV's implementation with its pre-trained structured-edge model) on all 4,952 test images, with times per image on one thread. BING finds the most objects up to 1,000 proposals and is about 15 times faster than EdgeBoxes and 77 times faster than Selective Search. Both alternatives draw tighter boxes (higher MABO), and EdgeBoxes overtakes BING at 5,000 proposals (97.6% vs 96.0%). Random boxes show what a method gains over chance.</p>
+<div class="tcap">Table III. Proposal methods on VOC 2007 (all test images)</div>
+<table class=""><thead><tr><th>Method</th><th>DR@100</th><th>DR@1000</th><th>MABO</th><th>ms/img</th></tr></thead><tbody><tr><td>BING, ours</td><td>67.2%</td><td>94.0%</td><td>0.651</td><td>10</td></tr><tr><td>BING + re-ranking (ours)</td><td>71.0%</td><td>94.7%</td><td>0.653</td><td>17</td></tr><tr><td>EdgeBoxes [4]</td><td>65.8%</td><td>91.6%</td><td>0.753</td><td>154</td></tr><tr><td>Selective Search, fast [2]</td><td>38.1%</td><td>89.2%</td><td>0.719</td><td>778</td></tr><tr><td>Random boxes</td><td>46.5%</td><td>72.9%</td><td>0.621</td><td>–</td></tr></tbody></table>
+<h3>D. Colour space: RGB, HSV or grayscale</h3>
+<p class="ni">We trained one BING model per colour space (Table IV). On VOC, HSV is slightly best and wins 15 of the 20 classes at 100 proposals; grayscale is lowest because it misses edges between regions that differ only in colour, which hurts small objects most. The ranking depends on the data: RGB is best on the synthetic scenes, where hue is unstable in dark and grey regions, and grayscale transfers best from synthetic training to real photographs. Merging the three ranked lists, as in the paper's BING-Diversified, gives the highest recall at 5,000 proposals (98.4%) but dilutes small budgets. We keep RGB as the default.</p>
+<div class="tcap">Table IV. Colour spaces: DR at 100 / 1000 proposals (synthetic and real columns: models trained on synthetic scenes; merged: RGB + HSV + Gray)</div>
+<table class=""><thead><tr><th>Space</th><th>VOC @100</th><th>VOC @1k</th><th>VOC small</th><th>Synth. @1k</th><th>Real @1k</th></tr></thead><tbody><tr><td>RGB</td><td>67.2%</td><td>94.0%</td><td>39.3%</td><td>98.5%</td><td>87.9%</td></tr><tr><td>HSV</td><td>68.9%</td><td>94.4%</td><td>39.9%</td><td>96.7%</td><td>87.9%</td></tr><tr><td>Gray</td><td>65.9%</td><td>93.2%</td><td>34.5%</td><td>94.5%</td><td>91.4%</td></tr><tr><td>Merged</td><td>54.0%</td><td>88.0%</td><td>4.3%</td><td>–</td><td>–</td></tr></tbody></table>
+<figure class="wide"><img src="../results/figures/colorspace_voc.png" alt=""><figcaption>Fig. 2. Colour spaces on VOC 2007: recall versus number of proposals, recall by object size, and DR@1000 on the three datasets.</figcaption></figure>
+<h3>E. Generalisation to unseen classes</h3>
+<p class="ni">Following the paper, we trained BING on the trainval images of six classes (bird, car, cat, cow, dog, sheep), with only their boxes as objects, and tested it on the other 14 classes (Table V). Its recall on the unseen classes is within 2.2 points of the model trained on all 20 classes, which supports the claim that BING learns generic objectness rather than class-specific appearance.</p>
+<div class="tcap">Table V. Training on 6 classes, testing on 14 unseen classes</div>
+<table class=""><thead><tr><th>Training classes</th><th>Test objects</th><th>DR@100</th><th>DR@1000</th><th>DR@5000</th></tr></thead><tbody><tr><td>6 (seen)</td><td>14 unseen classes (9039)</td><td>63.5%</td><td>91.1%</td><td>95.2%</td></tr><tr><td>all 20</td><td>14 unseen classes (9039)</td><td>66.6%</td><td>93.3%</td><td>95.5%</td></tr><tr><td>6 (seen)</td><td>6 seen classes (2993)</td><td>72.6%</td><td>97.2%</td><td>98.0%</td></tr><tr><td>all 20</td><td>6 seen classes (2993)</td><td>69.2%</td><td>96.2%</td><td>97.7%</td></tr></tbody></table>
+<h3>F. Novelty: multi-cue re-ranking</h3>
+<p class="ni">Re-ranking raises recall at every budget (Table VI, Fig. 3): 67.2% → 71.0% at 100 proposals, and small-object recall at 1000 from 39.3% to 53.3%. Recall at 5,000 cannot change, because re-ranking only re-orders BING's windows. Removing any cue group lowers recall; edge density matters most, especially for small objects. The cost is speed (17 instead of 10 ms per image on one thread). Two other extensions, snapping box sides to strong image edges and adding intermediate window sizes, looked promising on a 300-image subset but did not improve the full test set; we report them as negative results.</p>
+<div class="tcap">Table VI. Multi-cue re-ranking on VOC 2007</div>
+<table class=""><thead><tr><th>Method</th><th>DR@100</th><th>DR@1000</th><th>Small, DR@1000</th><th>AUC</th></tr></thead><tbody><tr><td>BING</td><td>67.2%</td><td>94.0%</td><td>39.3%</td><td>0.719</td></tr><tr><td><b>+ multi-cue re-ranking</b></td><td><b>71.0%</b></td><td>94.7%</td><td><b>53.3%</b></td><td>0.741</td></tr><tr><td>&nbsp;&nbsp;without colour contrast</td><td>69.5%</td><td>94.5%</td><td>51.6%</td><td>0.732</td></tr><tr><td>&nbsp;&nbsp;without edge density</td><td>69.4%</td><td>94.3%</td><td>45.0%</td><td>0.732</td></tr><tr><td>&nbsp;&nbsp;without geometry</td><td>70.2%</td><td>94.6%</td><td>54.8%</td><td>0.736</td></tr><tr><td>+ edge refinement (rejected)</td><td>66.8%</td><td>93.6%</td><td>37.0%</td><td>0.718</td></tr><tr><td>+ finer window sizes (rejected)</td><td>67.1%</td><td>93.9%</td><td>38.4%</td><td>0.719</td></tr></tbody></table>
+<figure class="wide"><img src="../results/figures/novelty_voc.png" alt=""><figcaption>Fig. 3. Multi-cue re-ranking: recall versus proposals, recall by object size, and the contribution of each cue group (DR@100).</figcaption></figure>
+<h3>G. Detection on the proposals</h3>
+<p class="ni">Table VII reports VOC 2007 mAP for the same detector given different windows. With CNN features and box regression, our re-ranked top 100 windows give the best result, 19.1%, against 7.4% with HOG. At 100 windows BING's boxes clearly beat random boxes and sliding windows. With 1,000 windows random boxes catch up (16.0%), because they are tighter: at IoU 0.7, BING's top 1000 cover 30% of objects and random boxes 43%. This agrees with Hosang et al. [5]. The absolute numbers stay well below R-CNN (about 58%) because our network is not fine-tuned.</p>
+<div class="tcap">Table VII. Detection mAP on VOC 2007 for the top 100 or 1000 windows (BR: box regression)</div>
+<table class=""><thead><tr><th>Windows</th><th>HOG @100</th><th>CNN @100</th><th>CNN+BR @100</th><th>CNN+BR @1k</th></tr></thead><tbody><tr><td>BING</td><td>6.8%</td><td>16.9%</td><td>18.8%</td><td>13.9%</td></tr><tr><td>+ re-ranking</td><td>7.4%</td><td>16.7%</td><td><b>19.1%</b></td><td>13.1%</td></tr><tr><td>Random</td><td>6.8%</td><td>11.4%</td><td>13.8%</td><td>16.0%</td></tr><tr><td>Sliding</td><td>0.5%</td><td>0.5%</td><td>0.6%</td><td>2.7%</td></tr></tbody></table>
+<figure class="wide"><img src="../results/figures/detection_voc.png" alt=""><figcaption>Fig. 4. Left: detector mAP for each source of windows (CNN features and box regression). Right: recall at stricter overlaps, where BING's coarse boxes fall behind random boxes.</figcaption></figure>
+<h3>H. Speed</h3>
+<p class="ni">All timings in Table VIII were measured on the same 4-core machine in one session (images per second on the 300-image speed subset). On one thread our implementation is faster than the C++ code; with one image per thread it reaches 294 images per second, against 300 for the C++ code, which matches the 300 fps reported in the paper.</p>
+<div class="tcap">Table VIII. Images per second on VOC 2007 images</div>
+<table class=""><thead><tr><th>Implementation (same machine)</th><th>1 thread</th><th>4 threads</th></tr></thead><tbody><tr><td>BING, authors' C++</td><td>76</td><td>300</td></tr><tr><td>BING, ours: window sizes in parallel</td><td>105</td><td>186</td></tr><tr><td>BING, ours: images in parallel</td><td>98</td><td><b>294</b></td></tr></tbody></table>
+<h3>I. Ablations</h3>
+<p class="ni">On the synthetic benchmark: gradient mask [−1 0 1] 98.5% vs Sobel 99.3%; feature bits N<sub>g</sub> = 1: 95.6%, N<sub>g</sub> = 4: 98.5%; filter bases N<sub>w</sub> = 1: 98.1%, N<sub>w</sub> = 2: 98.5%; 10 training images: 91.6%, 300: 98.5%. The simple gradient mask is sufficient, two feature bits recover almost all accuracy, and the 64-weight model needs very little training data.</p>
+
+<h2>VI. Discussion and Limitations</h2>
+<p class="ni">BING's weakness is localisation. Power-of-two window sizes and an 8-pixel stride make its boxes coarse (MABO 0.65), small objects are hard, and these limits show again in detection, where tighter random boxes overtake BING at large budgets. Our re-ranking improves the order of the windows but cannot change their shape; our edge-snapping refinement did not help either, so learned box regression applied to the proposals themselves is the most promising next step. The detector's CNN is frozen; fine-tuning it would raise mAP considerably. The real-photo set (58 objects) is small and serves only as a generalisation check.</p>
+
+<h2>VII. Conclusion</h2>
+<p class="ni">Simple gradients, a 64-weight linear model and bit operations find 94% of the objects in PASCAL VOC 2007, and our from-scratch implementation matches the authors' code in accuracy and speed. Our multi-cue re-ranking finds objects sooner, especially small ones; HSV gradients are marginally better than RGB on VOC; BING generalises to unseen classes; and detectors built on the proposals confirm both their value over sliding windows and the cost of BING's loose boxes.</p>
+
+<h2>References</h2>
+<div class="refs">
+<p>[1] M.-M. Cheng, Z. Zhang, W.-Y. Lin, and P. H. S. Torr, "BING: Binarized normed gradients for objectness estimation at 300fps," in <i>Proc. IEEE CVPR</i>, 2014.</p>
+<p>[2] J. R. R. Uijlings, K. E. A. van de Sande, T. Gevers, and A. W. M. Smeulders, "Selective search for object recognition," <i>Int. J. Comput. Vis.</i>, vol. 104, no. 2, 2013.</p>
+<p>[3] B. Alexe, T. Deselaers, and V. Ferrari, "Measuring the objectness of image windows," <i>IEEE Trans. Pattern Anal. Mach. Intell.</i>, vol. 34, no. 11, 2012.</p>
+<p>[4] C. L. Zitnick and P. Dollár, "Edge boxes: Locating object proposals from edges," in <i>Proc. ECCV</i>, 2014.</p>
+<p>[5] J. Hosang, R. Benenson, P. Dollár, and B. Schiele, "What makes for effective detection proposals?," <i>IEEE Trans. Pattern Anal. Mach. Intell.</i>, vol. 38, no. 4, 2016.</p>
+<p>[6] R. Girshick, J. Donahue, T. Darrell, and J. Malik, "Rich feature hierarchies for accurate object detection and semantic segmentation," in <i>Proc. IEEE CVPR</i>, 2014.</p>
+<p>[7] N. Dalal and B. Triggs, "Histograms of oriented gradients for human detection," in <i>Proc. IEEE CVPR</i>, 2005.</p>
+<p>[8] M. Everingham, L. Van Gool, C. K. I. Williams, J. Winn, and A. Zisserman, "The PASCAL visual object classes (VOC) challenge," <i>Int. J. Comput. Vis.</i>, vol. 88, no. 2, 2010.</p>
+<p>[9] K. He, X. Zhang, S. Ren, and J. Sun, "Deep residual learning for image recognition," in <i>Proc. IEEE CVPR</i>, 2016.</p>
+</div>
+</div>
+</body></html>

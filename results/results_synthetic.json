@@ -8004,21 +8004,21 @@
   }
  },
  "speed": {
-  "numpy|binary|area": 25.43519798621288,
-  "numpy|binary|linear": 35.59673735455174,
-  "numpy|float|area": 37.83945952252981,
-  "numpy|float|linear": 63.940207128621175,
-  "numba|binary|area": 44.62369817718002,
-  "numba|binary|linear": 80.28676705421168,
-  "numba|float|area": 54.54521472500949,
-  "numba|float|linear": 146.80115770561372,
-  "numba|binary|linear|1thread": 87.53622598080992
+  "numpy|binary|area": 45.77051837929221,
+  "numpy|binary|linear": 60.816773032465974,
+  "numpy|float|area": 61.77855436660551,
+  "numpy|float|linear": 98.97728748388646,
+  "numba|binary|area": 72.69168763500832,
+  "numba|binary|linear": 136.87043435988414,
+  "numba|float|area": 96.69943720985493,
+  "numba|float|linear": 211.52088342086,
+  "numba|binary|linear|1thread": 156.51179066941165
  },
  "stage_ms": {
-  "resize": 12.132169139949838,
-  "gradient": 1.2941667801078438,
-  "scoring": 5.086193180077316,
-  "nms+topk": 3.843758659895684
+  "resize": 6.614782279997371,
+  "gradient": 0.762030219998735,
+  "scoring": 3.1755949999975996,
+  "nms+topk": 2.1474625199991237
  },
  "ablations": {
   "colour=RGB": {
